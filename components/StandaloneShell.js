@@ -69,6 +69,10 @@ export default function StandaloneShell() {
   const [showSettings, setShowSettings] = useState(false);
   const [isHeaderVisible, setIsHeaderVisible] = useState(true);
   const [hasMounted, setHasMounted] = useState(false);
+  const [showVadooBanner, setShowVadooBanner] = useState(() => {
+    if (typeof window !== 'undefined') return localStorage.getItem('vadoo_banner_dismissed') !== '1';
+    return true;
+  });
 
   // Drag and Drop State
   const [isDragging, setIsDragging] = useState(false);
@@ -260,6 +264,30 @@ export default function StandaloneShell() {
         </div>
       )}
 
+      {/* Vadoo promo banner */}
+      {showVadooBanner && (
+        <div className="flex-shrink-0 w-full bg-[#d9ff00] flex items-center justify-center px-4 py-2 gap-3 relative z-50">
+          <a
+            href="https://vadoo.tv"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[13px] font-bold text-black hover:opacity-80 transition-opacity text-center"
+          >
+            Unrestricted AI Images &amp; Videos → Auto-Publish as YouTube Shorts &amp; TikToks, Earn ↗
+          </a>
+          <button
+            onClick={() => {
+              setShowVadooBanner(false);
+              localStorage.setItem('vadoo_banner_dismissed', '1');
+            }}
+            className="absolute right-3 text-black/50 hover:text-black transition-colors text-lg leading-none"
+            aria-label="Dismiss"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* Header */}
       {isHeaderVisible && (
         <header className="flex-shrink-0 h-14 border-b border-white/[0.03] flex items-center justify-between px-6 bg-black/20 backdrop-blur-md z-40 gap-4">
@@ -303,16 +331,6 @@ export default function StandaloneShell() {
 
           {/* Right: Actions */}
           <div className="flex-shrink-0 flex items-center gap-4">
-            {/* Vadoo promo */}
-            <a
-              href="https://vadoo.tv"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="hidden sm:flex items-center gap-1.5 text-[13px] font-bold bg-[#22d3ee] text-black px-3 py-1.5 rounded-md hover:opacity-90 transition-opacity whitespace-nowrap"
-            >
-              Unrestricted AI Images &amp; Videos → Auto-Publish &amp; Earn ↗
-            </a>
-
             <div className="flex items-center gap-3 bg-white/5 px-3 py-1.5 rounded-full border border-white/5 transition-colors">
               <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
               <div className="flex flex-col">
