@@ -310,7 +310,7 @@ export default function StandaloneShell() {
               rel="noopener noreferrer"
               className="hidden sm:flex items-center gap-1.5 text-[13px] font-bold bg-[#22d3ee] text-black px-3 py-1.5 rounded-md hover:opacity-90 transition-opacity whitespace-nowrap"
             >
-              Auto-Publish AI Images &amp; Videos, Earn ↗
+              Unrestricted AI Images &amp; Videos → Auto-Publish &amp; Earn ↗
             </a>
 
             <div className="flex items-center gap-3 bg-white/5 px-3 py-1.5 rounded-full border border-white/5 transition-colors">
