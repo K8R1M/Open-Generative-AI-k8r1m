@@ -196,6 +196,7 @@ export function normalizeNativeResult(raw = {}, ctx = {}) {
       ...base,
       status: rawStatus || 'failed',
       error: raw.error || raw.message || undefined,
+      message: raw.message || undefined,
       url: undefined,
       outputs: [],
     };
@@ -296,7 +297,7 @@ async function fetchNativeJob(jobId) {
 }
 
 function terminalNativeError(result, status) {
-  const reason = result.error || result.message || status || 'unknown';
+  const reason = result.message || result.error || status || 'unknown';
   return new Error(`Native generation ended with ${status}: ${reason}`);
 }
 

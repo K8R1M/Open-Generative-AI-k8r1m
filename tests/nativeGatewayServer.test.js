@@ -9,7 +9,7 @@ process.env.NATIVE_MEDIA_ROOT = path.join(process.cwd(), '.native-media-test', `
 delete process.env.NATIVE_MEDIA_LIVE_VERTEX;
 delete process.env.NATIVE_MEDIA_LIVE_CODEX;
 
-const { createServer } = require('../native-media-gateway/server.js');
+const { createServer, publicJob } = require('../native-media-gateway/server.js');
 
 function listen(server) {
   return new Promise((resolve) => {
@@ -46,6 +46,30 @@ test('native gateway loopback server exposes public generation responses only', 
   for (const field of ['outputPath', 'detail', 'pid', 'pgid', 'subprocessProvider', 'providerConfig']) {
     assert.equal(Object.hasOwn(job, field), false, `${field} must not be public`);
   }
+});
+
+test('publicJob exposes safe Vertex policy failures without private diagnostics', () => {
+  const job = publicJob({
+    id: 'job-policy',
+    status: 'INTERRUPTED_PROCESS',
+    error: 'NONZERO_EXIT',
+    detail: `RuntimeError: No video generated. Operation details: {
+      "error": {
+        "message": "Veo could not generate videos because the input image violates Vertex AI's usage guidelines. If you think this was an error, send feedback. Support codes: 15236754"
+      }
+    }`,
+    outputPath: '/tmp/private/output.mp4',
+    pid: 123,
+  });
+
+  assert.equal(job.detail, undefined);
+  assert.equal(job.outputPath, undefined);
+  assert.equal(job.pid, undefined);
+  assert.equal(job.error, 'NONZERO_EXIT');
+  assert.equal(
+    job.message,
+    'Veo could not generate the video because the input image violates Vertex AI usage guidelines. Support code: 15236754.'
+  );
 });
 
 test('native gateway support for range and suffix range requests', async (t) => {

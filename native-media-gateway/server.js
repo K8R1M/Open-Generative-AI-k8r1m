@@ -34,9 +34,22 @@ function safeError(error) {
   return { status: 500, body: { error: 'NATIVE_MEDIA_ERROR', message: 'Native media request failed.' } };
 }
 
+function publicFailureMessage(job) {
+  const detail = String(job && job.detail || '');
+  if (!detail) return null;
+  if (/input image violates Vertex AI'?s usage guidelines/i.test(detail)) {
+    const support = /Support codes?:\s*([0-9,\s]+)/i.exec(detail);
+    return `Veo could not generate the video because the input image violates Vertex AI usage guidelines.${support ? ` Support code: ${support[1].trim()}.` : ''}`;
+  }
+  return null;
+}
+
 function publicJob(job) {
   if (!job || typeof job !== 'object' || Array.isArray(job)) return job;
-  return Object.fromEntries(Object.entries(job).filter(([key]) => !PRIVATE_JOB_FIELDS.has(key)));
+  const out = Object.fromEntries(Object.entries(job).filter(([key]) => !PRIVATE_JOB_FIELDS.has(key)));
+  const message = publicFailureMessage(job);
+  if (message) out.message = message;
+  return out;
 }
 
 function generationOptions() {

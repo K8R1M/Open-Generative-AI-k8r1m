@@ -101,6 +101,36 @@ test('generateNativeMedia throws clear terminal errors for native terminal statu
   }
 });
 
+test('generateNativeMedia prefers safe terminal message over provider error code', async () => {
+  const impl = await loadNative('packages/studio/src/nativeMedia.js', 'safe terminal message');
+  let calls = 0;
+  const fetchImpl = async () => {
+    calls += 1;
+    if (calls === 1) return response({ id: 'job-policy', status: 'running' });
+    return response({
+      id: 'job-policy',
+      status: 'INTERRUPTED_PROCESS',
+      error: 'NONZERO_EXIT',
+      message: 'Veo could not generate the video because the input image violates Vertex AI usage guidelines. Support code: 15236754.',
+    });
+  };
+
+  await assert.rejects(
+    () =>
+      withMockedBrowserFetch(fetchImpl, () =>
+        impl.generateNativeMedia({
+          modelId: 'native.vertex.veo-3.1-fast',
+          task: 'image-to-video',
+          prompt: 'x',
+          clientRequestId: 'req-policy',
+          pollIntervalMs: 0,
+          pollTimeoutMs: 50,
+        })
+      ),
+    /Veo could not generate the video.*15236754/
+  );
+});
+
 test('generateNativeMedia times out bounded native polling', async () => {
   const impl = await loadNative('packages/studio/src/nativeMedia.js', 'I1 native client polling');
   let calls = 0;
