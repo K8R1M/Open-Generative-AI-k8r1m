@@ -1,0 +1,223 @@
+#!/usr/bin/env python3
+"""Generate videos using Google GenAI SDK."""
+
+from __future__ import annotations
+
+import argparse
+import os
+import sys
+import time
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+ENV_PATH = Path(__file__).resolve().parents[1] / ".env"
+load_dotenv(ENV_PATH, override=True)
+
+
+def _env_file_sets_google_application_credentials() -> bool:
+    try:
+        return any(
+            line.strip().startswith("GOOGLE_APPLICATION_CREDENTIALS=")
+            for line in ENV_PATH.read_text().splitlines()
+        )
+    except OSError:
+        return False
+
+
+def _normalize_google_application_credentials() -> None:
+    creds = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "")
+    explicit_override = (
+        _env_file_sets_google_application_credentials()
+        or os.environ.get("NATIVE_MEDIA_ALLOW_GOOGLE_APPLICATION_CREDENTIALS") == "1"
+    )
+    if creds and not explicit_override:
+        os.environ.pop("GOOGLE_APPLICATION_CREDENTIALS", None)
+        return
+    if creds and not os.path.isabs(creds):
+        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str((ENV_PATH.parent / creds).resolve())
+
+
+_normalize_google_application_credentials()
+
+from google import genai
+from google.genai import types
+
+
+VEO_MODELS = {
+    "veo-3.1-fast": "veo-3.1-fast-generate-001",
+    "veo-3.1": "veo-3.1-generate-001",
+    "veo-3": "veo-3.0-generate-001",
+}
+
+VALID_ASPECT_RATIOS = {"16:9", "9:16"}
+VALID_DURATIONS = {4, 6, 8}
+VALID_RESOLUTIONS = {"720p", "1080p"}
+
+VEO_PRICING_USD_PER_SECOND = {
+    "veo-3.1-fast": {
+        "video": {"720p": 0.08, "1080p": 0.10, "default": 0.10},
+        "video_audio": {"720p": 0.10, "1080p": 0.12, "default": 0.12},
+    },
+    "veo-3.1": {
+        "video": {"720p": 0.20, "1080p": 0.20, "default": 0.20},
+        "video_audio": {"720p": 0.40, "1080p": 0.40, "default": 0.40},
+    },
+    "veo-3": {
+        "video": {"720p": 0.20, "1080p": 0.20, "default": 0.20},
+        "video_audio": {"720p": 0.40, "1080p": 0.40, "default": 0.40},
+    },
+}
+
+
+def _estimate_cost_usd(model: str, duration: int, no_audio: bool, resolution: str | None = None) -> tuple[float, float]:
+    rate_key = "video" if no_audio else "video_audio"
+    rates = VEO_PRICING_USD_PER_SECOND[model][rate_key]
+    rate = rates.get(resolution or "default", rates["default"])
+    return rate, rate * duration
+
+
+def _build_vertex_client(project: str, location: str) -> genai.Client:
+    return genai.Client(vertexai=True, project=project, location=location)
+
+
+def _build_client(use_aistudio: bool, project: str, location: str) -> genai.Client:
+    if use_aistudio:
+        sys.exit("Error: AI Studio video generation is disabled. Use Vertex AI auth only.")
+    return _build_vertex_client(project, location)
+
+
+def _load_image(path: str) -> types.Image:
+    ext = os.path.splitext(path)[1].lower()
+    mime_map = {
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".webp": "image/webp",
+        ".gif": "image/gif",
+    }
+    with open(path, "rb") as f:
+        return types.Image(image_bytes=f.read(), mime_type=mime_map.get(ext, "image/png"))
+
+
+def _generate_video(
+    client: genai.Client,
+    model_id: str,
+    prompt: str,
+    duration: int = 8,
+    aspect_ratio: str = "16:9",
+    resolution: str | None = None,
+    no_audio: bool = False,
+    input_image: str | None = None,
+    last_frame: str | None = None,
+    reference_images: list[str] | None = None,
+) -> bytes:
+    config_kwargs = {
+        "aspect_ratio": aspect_ratio,
+        "duration_seconds": duration,
+        "number_of_videos": 1,
+        "enhance_prompt": True,
+    }
+    if resolution:
+        config_kwargs["resolution"] = resolution
+    if no_audio:
+        config_kwargs["generate_audio"] = False
+    if last_frame:
+        if not input_image:
+            raise ValueError("--last-frame requires --input-image")
+        config_kwargs["last_frame"] = _load_image(last_frame)
+    if reference_images:
+        config_kwargs["reference_images"] = [
+            types.VideoGenerationReferenceImage(image=_load_image(ref_path), reference_type="asset")
+            for ref_path in reference_images[:3]
+        ]
+
+    gen_kwargs = {
+        "model": model_id,
+        "prompt": prompt,
+        "config": types.GenerateVideosConfig(**config_kwargs),
+    }
+    if input_image:
+        gen_kwargs["image"] = _load_image(input_image)
+
+    operation = client.models.generate_videos(**gen_kwargs)
+    max_wait = 600
+    elapsed = 0
+    poll_interval = 10
+    while not operation.done:
+        if elapsed >= max_wait:
+            raise TimeoutError(f"Video generation timed out after {max_wait}s")
+        time.sleep(poll_interval)
+        elapsed += poll_interval
+        operation = client.operations.get(operation)
+        print(f"  Generating... ({elapsed}s elapsed)", file=sys.stderr)
+
+    if not operation.response or not operation.response.generated_videos:
+        details = ""
+        try:
+            details = operation.model_dump_json(indent=2, exclude_none=True)
+        except Exception:
+            details = repr(operation)
+        raise RuntimeError(f"No video generated. Operation details: {details}")
+    return operation.response.generated_videos[0].video.video_bytes
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Generate videos via Google GenAI SDK")
+    parser.add_argument("--prompt", "-p", required=True)
+    _env_default = os.environ.get("VIDEO_MODEL", "veo-3.1-fast")
+    if _env_default not in VEO_MODELS:
+        print(f"Warning: VIDEO_MODEL='{_env_default}' not in {list(VEO_MODELS.keys())}; using veo-3.1-fast", file=sys.stderr)
+        _env_default = "veo-3.1-fast"
+    parser.add_argument("--model", "-m", default=_env_default, choices=list(VEO_MODELS.keys()))
+    parser.add_argument("--output", "-o", required=True)
+    parser.add_argument("--duration", "-d", type=int, default=8, choices=sorted(VALID_DURATIONS))
+    parser.add_argument("--aspect-ratio", "-a", default="16:9", choices=sorted(VALID_ASPECT_RATIOS))
+    parser.add_argument("--resolution", choices=sorted(VALID_RESOLUTIONS))
+    parser.add_argument("--no-audio", action="store_true")
+    parser.add_argument("--input-image")
+    parser.add_argument("--last-frame")
+    parser.add_argument("--reference-image", action="append")
+    parser.add_argument("--use-aistudio", action="store_true")
+    parser.add_argument("--no-fallback", action="store_true")
+    parser.add_argument("--project", default=os.environ.get("GOOGLE_CLOUD_PROJECT"))
+    args = parser.parse_args()
+
+    if not args.use_aistudio and not args.project:
+        sys.exit("Error: GOOGLE_CLOUD_PROJECT not set.")
+    if args.last_frame and not args.input_image:
+        sys.exit("Error: --last-frame requires --input-image")
+    for img_path in [args.input_image, args.last_frame, *(args.reference_image or [])]:
+        if img_path and not os.path.exists(img_path):
+            sys.exit(f"Error: image file not found: {img_path}")
+
+    client = _build_client(args.use_aistudio, args.project, "global")
+    rate, estimated_total = _estimate_cost_usd(args.model, args.duration, args.no_audio, args.resolution)
+    audio_label = "video only (--no-audio)" if args.no_audio else "video + audio"
+    print(
+        f"Estimated cost: ${estimated_total:.2f} ({audio_label}, ${rate:.2f}/sec, pricing: https://cloud.google.com/vertex-ai/generative-ai/pricing#veo)",
+        file=sys.stderr,
+    )
+
+    video_bytes = _generate_video(
+        client,
+        VEO_MODELS[args.model],
+        args.prompt,
+        duration=args.duration,
+        aspect_ratio=args.aspect_ratio,
+        resolution=args.resolution,
+        no_audio=args.no_audio,
+        input_image=args.input_image,
+        last_frame=args.last_frame,
+        reference_images=args.reference_image,
+    )
+
+    output_path = os.path.abspath(args.output)
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    with open(output_path, "wb") as f:
+        f.write(video_bytes)
+    print(f"MEDIA:{output_path}")
+
+
+if __name__ == "__main__":
+    main()

@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import dynamic from 'next/dynamic';
-import { ImageStudio, VideoStudio, ClippingStudio, VibeMotionStudio, LipSyncStudio, CinemaStudio, AudioStudio, MarketingStudio, WorkflowStudio, AgentStudio, AppsStudio, getUserBalance } from 'studio';
+import { ImageStudio, VideoStudio, ClippingStudio, VibeMotionStudio, LipSyncStudio, CinemaStudio, AudioStudio, MarketingStudio, WorkflowStudio, AgentStudio, AppsStudio, getUserBalance, hasUsableNativeCapabilities } from 'studio';
 
 const DesignAgentStudio = dynamic(() => import('studio').then(mod => mod.DesignAgentStudio), {
   ssr: false,
@@ -64,6 +64,7 @@ export default function StandaloneShell() {
   
   const [apiKey, setApiKey] = useState(null);
   const [activeTab, setActiveTab] = useState(getInitialTab());
+  const [nativeUsable, setNativeUsable] = useState(null);
 
   const [balance, setBalance] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
@@ -145,6 +146,24 @@ export default function StandaloneShell() {
       document.cookie = `muapi_key=${stored}; path=/; max-age=31536000; SameSite=Lax`;
     }
   }, [fetchBalance]);
+
+  useEffect(() => {
+    if (apiKey) {
+      setNativeUsable(null);
+      return;
+    }
+    let cancelled = false;
+    hasUsableNativeCapabilities({ apiKey: undefined, enabled: true })
+      .then((usable) => {
+        if (!cancelled) setNativeUsable(Boolean(usable));
+      })
+      .catch(() => {
+        if (!cancelled) setNativeUsable(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [apiKey]);
 
   const handleKeySave = useCallback((key) => {
     localStorage.setItem(STORAGE_KEY, key);
@@ -235,7 +254,15 @@ export default function StandaloneShell() {
     </div>
   );
 
-  if (!apiKey) {
+  if (!apiKey && nativeUsable === null) {
+    return (
+      <div className="min-h-screen bg-[#050505] flex items-center justify-center">
+        <div className="animate-spin text-[#22d3ee] text-3xl">◌</div>
+      </div>
+    );
+  }
+
+  if (!apiKey && !nativeUsable) {
     return <ApiKeyModal onSave={handleKeySave} />;
   }
 

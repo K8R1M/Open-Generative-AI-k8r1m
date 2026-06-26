@@ -17,8 +17,106 @@ import {
   getModesForModel,
   getMaxImagesForI2VModel,
 } from "../models.js";
+import {
+  NATIVE_MODELS,
+  NATIVE_ASSET_URL_PREFIX,
+  isNativeModelId,
+  nativeModelById,
+} from "../nativeModels.js";
+import { generateNativeMedia, uploadNativeFile } from "../nativeMedia.js";
 
 // ── tiny helpers ──────────────────────────────────────────────────────────────
+
+function nativeVideoModelToDescriptor(m) {
+  const aspectRatios = m.aspectRatios || ["16:9"];
+  const durations = m.durationsSeconds || [8];
+  const resolutions = m.resolutions || ["720p"];
+  return {
+    id: m.id,
+    name: m.label,
+    endpoint: m.id,
+    native: true,
+    imageField: "images_list",
+    lastImageField: "last_image",
+    maxImages: 1 + (m.maxReferenceImages || 0),
+    inputs: {
+      prompt: { name: "prompt", type: "string" },
+      aspect_ratio: { enum: aspectRatios, default: aspectRatios[0] || "16:9" },
+      duration: { enum: durations, default: durations[0] || 8 },
+      resolution: { enum: resolutions, default: resolutions[0] || "720p" },
+    },
+  };
+}
+
+const NATIVE_T2V_DESCRIPTORS = NATIVE_MODELS.filter(
+  (m) => m.kind === "video" && m.tasks?.includes("text-to-video"),
+).map(nativeVideoModelToDescriptor);
+
+const NATIVE_I2V_DESCRIPTORS = NATIVE_MODELS.filter(
+  (m) => m.kind === "video" && m.tasks?.includes("image-to-video"),
+).map(nativeVideoModelToDescriptor);
+
+const mergedT2VModels = [...t2vModels, ...NATIVE_T2V_DESCRIPTORS];
+const mergedI2VModels = [...i2vModels, ...NATIVE_I2V_DESCRIPTORS];
+
+function getAspectRatiosForT2VNative(modelId) {
+  if (isNativeModelId(modelId)) {
+    return nativeModelById(modelId)?.aspectRatios || ["16:9"];
+  }
+  return getAspectRatiosForVideoModel(modelId);
+}
+
+function getDurationsForT2VNative(modelId) {
+  if (isNativeModelId(modelId)) {
+    return nativeModelById(modelId)?.durationsSeconds || [8];
+  }
+  return getDurationsForModel(modelId);
+}
+
+function getResolutionsForT2VNative(modelId) {
+  if (isNativeModelId(modelId)) {
+    return nativeModelById(modelId)?.resolutions || ["720p"];
+  }
+  return getResolutionsForVideoModel(modelId);
+}
+
+function getAspectRatiosForI2VNative(modelId) {
+  if (isNativeModelId(modelId)) {
+    return nativeModelById(modelId)?.aspectRatios || ["16:9"];
+  }
+  return getAspectRatiosForI2VModel(modelId);
+}
+
+function getDurationsForI2VNative(modelId) {
+  if (isNativeModelId(modelId)) {
+    return nativeModelById(modelId)?.durationsSeconds || [8];
+  }
+  return getDurationsForI2VModel(modelId);
+}
+
+function getResolutionsForI2VNative(modelId) {
+  if (isNativeModelId(modelId)) {
+    return nativeModelById(modelId)?.resolutions || ["720p"];
+  }
+  return getResolutionsForI2VModel(modelId);
+}
+
+function getMaxImagesForI2VNative(modelId) {
+  if (isNativeModelId(modelId)) {
+    const m = nativeModelById(modelId);
+    return 1 + (m?.maxReferenceImages || 0);
+  }
+  return getMaxImagesForI2VModel(modelId);
+}
+
+function nativeInputFromUrl(url, role) {
+  if (typeof url !== "string" || !url) return null;
+  if (!url.startsWith(NATIVE_ASSET_URL_PREFIX)) {
+    throw new Error("Native video inputs must be uploaded through native assets.");
+  }
+  const assetId = url.slice(NATIVE_ASSET_URL_PREFIX.length).split(/[?#]/)[0];
+  return { kind: "asset", assetId, role };
+}
 
 function getQualitiesForModel(modelList, modelId) {
   const model = modelList.find((m) => m.id === modelId);
@@ -107,7 +205,7 @@ function DropdownItem({ label, selected, onClick }) {
 function ModelDropdown({ imageMode, selectedModel, onSelect, onClose }) {
   const [search, setSearch] = useState("");
 
-  const generationModels = imageMode ? i2vModels : t2vModels;
+  const generationModels = imageMode ? mergedI2VModels : mergedT2VModels;
 
   const lf = search.toLowerCase();
   const filteredMain = generationModels.filter(
@@ -265,6 +363,7 @@ export default function VideoStudio({
   );
   const [selectedMode, setSelectedMode] = useState("");
   const [selectedEffect, setSelectedEffect] = useState("");
+  const [selectedAudio, setSelectedAudio] = useState(true);
 
   // ── upload progress ──
   const [imageProgress, setImageProgress] = useState(0);
@@ -277,6 +376,7 @@ export default function VideoStudio({
   const [showQuality, setShowQuality] = useState(false);
   const [showMode, setShowMode] = useState(false);
   const [showEffect, setShowEffect] = useState(false);
+  const [showAudio, setShowAudio] = useState(false);
 
   // ── uploads ──
   const [uploadedImageUrl, setUploadedImageUrl] = useState(null);
@@ -325,28 +425,28 @@ export default function VideoStudio({
 
   const getCurrentModels = useCallback(() => {
     if (v2vMode) return v2vModels;
-    return imageMode ? i2vModels : t2vModels;
+    return imageMode ? mergedI2VModels : mergedT2VModels;
   }, [imageMode, v2vMode]);
 
   const getCurrentAspectRatios = useCallback(
     (id) =>
       imageMode
-        ? getAspectRatiosForI2VModel(id)
-        : getAspectRatiosForVideoModel(id),
+        ? getAspectRatiosForI2VNative(id)
+        : getAspectRatiosForT2VNative(id),
     [imageMode],
   );
 
   const getCurrentDurations = useCallback(
     (id) =>
-      imageMode ? getDurationsForI2VModel(id) : getDurationsForModel(id),
+      imageMode ? getDurationsForI2VNative(id) : getDurationsForT2VNative(id),
     [imageMode],
   );
 
   const getCurrentResolutions = useCallback(
     (id) =>
       imageMode
-        ? getResolutionsForI2VModel(id)
-        : getResolutionsForVideoModel(id),
+        ? getResolutionsForI2VNative(id)
+        : getResolutionsForT2VNative(id),
     [imageMode],
   );
 
@@ -374,15 +474,16 @@ export default function VideoStudio({
         setShowQuality(false);
         setShowMode(false);
         setShowEffect(false);
+        setShowAudio(false);
         return;
       }
 
-      const modelList = isImageMode ? i2vModels : t2vModels;
+      const modelList = isImageMode ? mergedI2VModels : mergedT2VModels;
       const model = modelList.find((m) => m.id === modelId);
 
       const ars = isImageMode
-        ? getAspectRatiosForI2VModel(modelId)
-        : getAspectRatiosForVideoModel(modelId);
+        ? getAspectRatiosForI2VNative(modelId)
+        : getAspectRatiosForT2VNative(modelId);
       if (ars.length > 0) {
         setSelectedAr(ars[0]);
         setShowAr(true);
@@ -391,8 +492,8 @@ export default function VideoStudio({
       }
 
       const durations = isImageMode
-        ? getDurationsForI2VModel(modelId)
-        : getDurationsForModel(modelId);
+        ? getDurationsForI2VNative(modelId)
+        : getDurationsForT2VNative(modelId);
       if (durations.length > 0) {
         setSelectedDuration(durations[0]);
         setShowDuration(true);
@@ -401,8 +502,8 @@ export default function VideoStudio({
       }
 
       const resolutions = isImageMode
-        ? getResolutionsForI2VModel(modelId)
-        : getResolutionsForVideoModel(modelId);
+        ? getResolutionsForI2VNative(modelId)
+        : getResolutionsForT2VNative(modelId);
       if (resolutions.length > 0) {
         setSelectedResolution(resolutions[0]);
         setShowResolution(true);
@@ -436,6 +537,9 @@ export default function VideoStudio({
         setSelectedEffect("");
         setShowEffect(false);
       }
+
+      setSelectedAudio(true);
+      setShowAudio(isNativeModelId(modelId));
     },
     [],
   );
@@ -473,6 +577,7 @@ export default function VideoStudio({
           !!data.imageMode,
           !!data.v2vMode
         );
+        if (data.selectedAudio !== undefined) setSelectedAudio(!!data.selectedAudio);
       }
     } catch (err) {
       console.warn("Failed to load VideoStudio persistence:", err);
@@ -509,6 +614,7 @@ export default function VideoStudio({
           selectedQuality,
           selectedMode,
           selectedEffect,
+          selectedAudio,
           uploadedImageUrl,
           uploadedImageUrls,
           uploadedVideoUrl,
@@ -533,6 +639,7 @@ export default function VideoStudio({
     selectedQuality,
     selectedMode,
     selectedEffect,
+    selectedAudio,
     uploadedImageUrl,
     uploadedImageUrls,
     uploadedVideoUrl,
@@ -551,9 +658,11 @@ export default function VideoStudio({
     setImageUploading(true);
     setImageProgress(0);
     try {
-      const url = await uploadFile(apiKey, file, (pct) => {
-        setImageProgress(pct);
-      });
+      const url = isNativeModelId(selectedModel)
+        ? (await uploadNativeFile(file)).url
+        : await uploadFile(apiKey, file, (pct) => {
+            setImageProgress(pct);
+          });
       setUploadedImageUrl(url);
       setUploadedVideoUrl(null);
       setUploadedVideoName(null);
@@ -561,19 +670,25 @@ export default function VideoStudio({
 
       let targetModelId = selectedModel;
       if (!imageMode) {
-        const currentT2V = t2vModels.find((m) => m.id === selectedModel);
-        const sibling = currentT2V?.family
-          ? i2vModels.find((m) => m.family === currentT2V.family)
-          : null;
-        const target = sibling || i2vModels[0];
-        targetModelId = target.id;
-        setImageMode(true);
-        setSelectedModel(target.id);
-        setSelectedModelName(target.name);
-        applyControlsForModel(target.id, true, false);
+        const nativeModel = isNativeModelId(selectedModel) ? nativeModelById(selectedModel) : null;
+        if (nativeModel?.tasks?.includes("image-to-video")) {
+          setImageMode(true);
+          applyControlsForModel(selectedModel, true, false);
+        } else {
+          const currentT2V = t2vModels.find((m) => m.id === selectedModel);
+          const sibling = currentT2V?.family
+            ? i2vModels.find((m) => m.family === currentT2V.family)
+            : null;
+          const target = sibling || i2vModels[0];
+          targetModelId = target.id;
+          setImageMode(true);
+          setSelectedModel(target.id);
+          setSelectedModelName(target.name);
+          applyControlsForModel(target.id, true, false);
+        }
       }
 
-      const maxImgs = getMaxImagesForI2VModel(targetModelId);
+      const maxImgs = getMaxImagesForI2VNative(targetModelId);
       if (maxImgs > 2) {
         setUploadedImageUrls((prev) => {
           if (prev.includes(url)) return prev;
@@ -678,9 +793,11 @@ export default function VideoStudio({
     setImageProgress(0);
 
     try {
-      const url = await uploadFile(apiKey, file, (pct) => {
-        setImageProgress(pct);
-      });
+      const url = isNativeModelId(selectedModel)
+        ? (await uploadNativeFile(file)).url
+        : await uploadFile(apiKey, file, (pct) => {
+            setImageProgress(pct);
+          });
       setUploadedImageUrl(url);
 
       // Motion-control v2v: image is a second input, not a mode switch
@@ -695,19 +812,25 @@ export default function VideoStudio({
 
         let targetModelId = selectedModel;
         if (!imageMode) {
-          const currentT2V = t2vModels.find((m) => m.id === selectedModel);
-          const sibling = currentT2V?.family
-            ? i2vModels.find((m) => m.family === currentT2V.family)
-            : null;
-          const target = sibling || i2vModels[0];
-          targetModelId = target.id;
-          setImageMode(true);
-          setSelectedModel(target.id);
-          setSelectedModelName(target.name);
-          applyControlsForModel(target.id, true, false);
+          const nativeModel = isNativeModelId(selectedModel) ? nativeModelById(selectedModel) : null;
+          if (nativeModel?.tasks?.includes("image-to-video")) {
+            setImageMode(true);
+            applyControlsForModel(selectedModel, true, false);
+          } else {
+            const currentT2V = t2vModels.find((m) => m.id === selectedModel);
+            const sibling = currentT2V?.family
+              ? i2vModels.find((m) => m.family === currentT2V.family)
+              : null;
+            const target = sibling || i2vModels[0];
+            targetModelId = target.id;
+            setImageMode(true);
+            setSelectedModel(target.id);
+            setSelectedModelName(target.name);
+            applyControlsForModel(target.id, true, false);
+          }
         }
 
-        const maxImgs = getMaxImagesForI2VModel(targetModelId);
+        const maxImgs = getMaxImagesForI2VNative(targetModelId);
         if (maxImgs > 2) {
           setUploadedImageUrls((prev) => {
             if (prev.includes(url)) return prev;
@@ -735,10 +858,15 @@ export default function VideoStudio({
     // Motion-control v2v: keep model and video; just drop the image
     if (isMotionControlSelection(selectedModel, v2vMode)) return;
     setImageMode(false);
-    const first = t2vModels[0];
-    setSelectedModel(first.id);
-    setSelectedModelName(first.name);
-    applyControlsForModel(first.id, false, false);
+    const nativeModel = isNativeModelId(selectedModel) ? nativeModelById(selectedModel) : null;
+    if (nativeModel?.tasks?.includes("text-to-video")) {
+      applyControlsForModel(selectedModel, false, false);
+    } else {
+      const first = t2vModels[0];
+      setSelectedModel(first.id);
+      setSelectedModelName(first.name);
+      applyControlsForModel(first.id, false, false);
+    }
     setPromptDisabled(false);
   };
 
@@ -750,10 +878,15 @@ export default function VideoStudio({
       // Reset to text-to-video if empty list
       if (isMotionControlSelection(selectedModel, v2vMode)) return;
       setImageMode(false);
-      const first = t2vModels[0];
-      setSelectedModel(first.id);
-      setSelectedModelName(first.name);
-      applyControlsForModel(first.id, false, false);
+      const nativeModel = isNativeModelId(selectedModel) ? nativeModelById(selectedModel) : null;
+      if (nativeModel?.tasks?.includes("text-to-video")) {
+        applyControlsForModel(selectedModel, false, false);
+      } else {
+        const first = t2vModels[0];
+        setSelectedModel(first.id);
+        setSelectedModelName(first.name);
+        applyControlsForModel(first.id, false, false);
+      }
       setPromptDisabled(false);
     } else {
       setUploadedImageUrl(nextUrls[0]);
@@ -771,9 +904,11 @@ export default function VideoStudio({
     setEndImageUploading(true);
     setEndImageProgress(0);
     try {
-      const url = await uploadFile(apiKey, file, (pct) => {
-        setEndImageProgress(pct);
-      });
+      const url = isNativeModelId(selectedModel)
+        ? (await uploadNativeFile(file)).url
+        : await uploadFile(apiKey, file, (pct) => {
+            setEndImageProgress(pct);
+          });
       setUploadedEndImageUrl(url);
     } catch (err) {
       alert(`End frame upload failed: ${err.message}`);
@@ -917,7 +1052,7 @@ export default function VideoStudio({
         return;
       }
     } else if (imageMode) {
-      const maxImgs = getMaxImagesForI2VModel(selectedModel);
+      const maxImgs = getMaxImagesForI2VNative(selectedModel);
       if (maxImgs > 2) {
         if (uploadedImageUrls.length === 0) {
           alert("Please upload at least one reference image first.");
@@ -932,6 +1067,16 @@ export default function VideoStudio({
     } else {
       if (!trimmedPrompt) {
         alert("Please enter a prompt to generate a video.");
+        return;
+      }
+    }
+
+    if (imageMode && isNativeModelId(selectedModel)) {
+      const model = nativeModelById(selectedModel);
+      const refCount = model?.referenceImagesEnabled ? Math.max(0, uploadedImageUrls.length - 1) : 0;
+      const requiredDuration = model?.referenceDurationSeconds || 8;
+      if (refCount > 0 && Number(selectedDuration) !== requiredDuration) {
+        alert(`Veo reference images require ${requiredDuration}s duration.`);
         return;
       }
     }
@@ -980,7 +1125,53 @@ export default function VideoStudio({
             type: "video",
           });
       } else if (imageMode) {
-        const maxImgs = getMaxImagesForI2VModel(selectedModel);
+        const maxImgs = getMaxImagesForI2VNative(selectedModel);
+        if (isNativeModelId(selectedModel)) {
+          const model = nativeModelById(selectedModel);
+          const imageUrls = model?.referenceImagesEnabled ? uploadedImageUrls : uploadedImageUrls.slice(0, 1);
+          const inputs = imageUrls
+            .map((u, idx) => nativeInputFromUrl(u, idx === 0 ? "first-frame" : "reference"))
+            .filter(Boolean);
+          const endFrame = nativeInputFromUrl(uploadedEndImageUrl, "last-frame");
+          if (endFrame) inputs.push(endFrame);
+          res = await generateNativeMedia({
+            modelId: selectedModel,
+            task: "image-to-video",
+            prompt: trimmedPrompt,
+            parameters: {
+              aspectRatio: selectedAr,
+              durationSeconds: Number(selectedDuration),
+              resolution: selectedResolution,
+              audio: selectedAudio,
+            },
+            inputs,
+          });
+          if (!res?.url) throw new Error("No video URL returned by API");
+
+          const genId = res.request_id || res.id || Date.now().toString();
+          setLastGenerationId(null);
+          setLastGenerationModel(null);
+          const entry = {
+            id: genId,
+            url: res.url,
+            prompt: trimmedPrompt,
+            model: selectedModel,
+            aspect_ratio: selectedAr,
+            duration: selectedDuration,
+            resolution: selectedResolution,
+            timestamp: new Date().toISOString(),
+          };
+          addToLocalHistory(entry);
+          showVideoInCanvas(res.url, selectedModel);
+          if (onGenerationComplete)
+            onGenerationComplete({
+              url: res.url,
+              model: selectedModel,
+              prompt: trimmedPrompt,
+              type: "video",
+            });
+          return;
+        }
         const i2vParams = { model: selectedModel };
         if (maxImgs > 2) {
           i2vParams.images_list = uploadedImageUrls;
@@ -993,9 +1184,9 @@ export default function VideoStudio({
         if (uploadedEndImageUrl && i2vModel?.lastImageField) {
           i2vParams.last_image = uploadedEndImageUrl;
         }
-        const durations = getDurationsForI2VModel(selectedModel);
+        const durations = getDurationsForI2VNative(selectedModel);
         if (durations.length > 0) i2vParams.duration = selectedDuration;
-        const resolutions = getResolutionsForI2VModel(selectedModel);
+        const resolutions = getResolutionsForI2VNative(selectedModel);
         if (resolutions.length > 0) i2vParams.resolution = selectedResolution;
         if (selectedQuality) i2vParams.quality = selectedQuality;
         if (selectedMode) i2vParams.mode = selectedMode;
@@ -1032,6 +1223,44 @@ export default function VideoStudio({
           });
       } else {
         // T2V (including extend mode)
+        if (isNativeModelId(selectedModel)) {
+          res = await generateNativeMedia({
+            modelId: selectedModel,
+            task: "text-to-video",
+            prompt: trimmedPrompt,
+            parameters: {
+              aspectRatio: selectedAr,
+              durationSeconds: Number(selectedDuration),
+              resolution: selectedResolution,
+              audio: selectedAudio,
+            },
+          });
+          if (!res?.url) throw new Error("No video URL returned by API");
+
+          const genId = res.request_id || res.id || Date.now().toString();
+          setLastGenerationId(null);
+          setLastGenerationModel(null);
+          const entry = {
+            id: genId,
+            url: res.url,
+            prompt: trimmedPrompt,
+            model: selectedModel,
+            aspect_ratio: selectedAr,
+            duration: selectedDuration,
+            resolution: selectedResolution,
+            timestamp: new Date().toISOString(),
+          };
+          addToLocalHistory(entry);
+          showVideoInCanvas(res.url, selectedModel);
+          if (onGenerationComplete)
+            onGenerationComplete({
+              url: res.url,
+              model: selectedModel,
+              prompt: trimmedPrompt,
+              type: "video",
+            });
+          return;
+        }
         const params = { model: selectedModel };
         if (trimmedPrompt) params.prompt = trimmedPrompt;
 
@@ -1041,9 +1270,9 @@ export default function VideoStudio({
           params.aspect_ratio = selectedAr;
         }
 
-        const durations = getDurationsForModel(selectedModel);
+        const durations = getDurationsForT2VNative(selectedModel);
         if (durations.length > 0) params.duration = selectedDuration;
-        const resolutions = getResolutionsForVideoModel(selectedModel);
+        const resolutions = getResolutionsForT2VNative(selectedModel);
         if (resolutions.length > 0) params.resolution = selectedResolution;
         if (selectedQuality) params.quality = selectedQuality;
         if (selectedMode) params.mode = selectedMode;
@@ -1101,10 +1330,12 @@ export default function VideoStudio({
     selectedQuality,
     selectedMode,
     selectedEffect,
+    selectedAudio,
     showEffect,
     uploadedImageUrl,
     uploadedImageUrls,
     uploadedVideoUrl,
+    uploadedEndImageUrl,
     lastGenerationId,
     getCurrentModel,
     addToLocalHistory,
@@ -1305,7 +1536,7 @@ export default function VideoStudio({
         <div className="w-full bg-[#0a0a0a]/80 backdrop-blur-3xl rounded-md border border-white/10 p-4 flex flex-col gap-2 shadow-2xl">
           <div className="flex items-center gap-2 px-1">
             {/* Image upload button / thumbnails */}
-            {imageMode && getMaxImagesForI2VModel(selectedModel) > 2 ? (
+            {imageMode && getMaxImagesForI2VNative(selectedModel) > 2 ? (
               <div className="flex items-center gap-2 flex-wrap">
                 {uploadedImageUrls.map((url, idx) => (
                   <div key={idx} className="relative w-10 h-10 shrink-0 rounded-full border border-primary/60 bg-primary/5 overflow-hidden group">
@@ -1323,7 +1554,7 @@ export default function VideoStudio({
                     </span>
                   </div>
                 ))}
-                {uploadedImageUrls.length < getMaxImagesForI2VModel(selectedModel) && (
+                {uploadedImageUrls.length < getMaxImagesForI2VNative(selectedModel) && (
                   <div className="relative">
                     <input
                       ref={imageFileInputRef}
@@ -1451,7 +1682,7 @@ export default function VideoStudio({
             )}
 
             {/* End-frame upload button (FLF i2v models only) */}
-            {imageMode && i2vModels.find((m) => m.id === selectedModel)?.lastImageField && (
+            {imageMode && currentModelObj?.lastImageField && (
               <div className="relative">
                 <input
                   ref={endImageFileInputRef}
@@ -1880,6 +2111,34 @@ export default function VideoStudio({
                     </div>
                   )}
                 </div>
+              )}
+              {showAudio && (
+                <button
+                  type="button"
+                  title={selectedAudio ? "Disable Veo audio" : "Enable Veo audio"}
+                  onClick={() => setSelectedAudio((v) => !v)}
+                  className="flex items-center gap-2 px-3 py-2 bg-white/[0.03] hover:bg-white/[0.06] rounded-md transition-all border border-white/[0.03] group whitespace-nowrap"
+                >
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    className="opacity-40 text-white"
+                  >
+                    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+                    {selectedAudio ? (
+                      <path d="M15 9.5a4 4 0 010 5M18 7a8 8 0 010 10" />
+                    ) : (
+                      <line x1="16" y1="9" x2="21" y2="14" />
+                    )}
+                  </svg>
+                  <span className="text-[11px] font-semibold text-white/70 group-hover:text-[#22d3ee] transition-colors">
+                    {selectedAudio ? "Audio on" : "Audio off"}
+                  </span>
+                </button>
               )}
             </div>
 

@@ -36,3 +36,14 @@ out/
 .env
 .env.*
 !.env.example
+.native-media/
+.agent_context/
+.multica/
+.opencode/
+.understand-anything/
+graphify-out/*
+!graphify-out/
+!graphify-out/graph.json
+native-media-gateway/.env
+__pycache__/
+*.pyc

@@ -15,6 +15,150 @@ import {
   getEffectsForI2IModel,
   getDefaultEffectForI2IModel,
 } from "../models.js";
+import {
+  NATIVE_MODELS,
+  NATIVE_ASSET_URL_PREFIX,
+  isNativeModelId,
+  nativeModelById,
+} from "../nativeModels.js";
+import { generateNativeMedia, uploadNativeFile } from "../nativeMedia.js";
+
+// ─── Native model overlay (C3) ──────────────────────────────────────────────
+// Native image models share their Vertex/Codex facade IDs for both T2I and I2I.
+// We project them into the existing models.js shape so the dropdowns and helper
+// functions keep working, while handleGenerate routes native IDs through the C2
+// facade instead of the legacy MuAPI functions. Existing MuAPI/local model IDs
+// and their lists are left untouched; native entries are appended after them.
+
+function nativeImageModelToT2IDescriptor(m) {
+  const aspectRatios = (m && m.aspectRatios) || ["1:1"];
+  const imageSizes = (m && m.imageSizes) || [];
+  const inputs = {
+    prompt: { name: "prompt", type: "string" },
+    aspect_ratio: { enum: aspectRatios, default: aspectRatios[0] || "1:1" },
+  };
+  if (imageSizes.length > 0) {
+    inputs.imageSize = { enum: imageSizes, default: imageSizes[0] };
+  }
+  return {
+    id: m.id,
+    name: m.label,
+    endpoint: m.id,
+    native: true,
+    inputs,
+  };
+}
+
+function getNativeImageModelMaxSlotCount(model) {
+  const maxReferences = model && model.maxReferences ? model.maxReferences : 0;
+  return 1 + maxReferences;
+}
+
+function nativeImageModelToI2IDescriptor(m) {
+  const aspectRatios = (m && m.aspectRatios) || ["1:1"];
+  const imageSizes = (m && m.imageSizes) || [];
+  const inputs = {
+    prompt: { name: "prompt", type: "string" },
+    aspect_ratio: { enum: aspectRatios, default: aspectRatios[0] || "1:1" },
+  };
+  if (imageSizes.length > 0) {
+    inputs.imageSize = { enum: imageSizes, default: imageSizes[0] };
+  }
+  return {
+    id: m.id,
+    name: m.label,
+    endpoint: m.id,
+    native: true,
+    imageField: "images_list",
+    maxImages: getNativeImageModelMaxSlotCount(m),
+    inputs,
+  };
+}
+
+const NATIVE_T2I_DESCRIPTORS = NATIVE_MODELS.filter(
+  (m) =>
+    m.kind === "image" &&
+    Array.isArray(m.tasks) &&
+    m.tasks.includes("text-to-image"),
+).map(nativeImageModelToT2IDescriptor);
+
+const NATIVE_I2I_DESCRIPTORS = NATIVE_MODELS.filter(
+  (m) =>
+    m.kind === "image" &&
+    Array.isArray(m.tasks) &&
+    m.tasks.includes("image-to-image"),
+).map(nativeImageModelToI2IDescriptor);
+
+// Append native descriptors after existing MuAPI/local models so native options
+// appear only as additive entries and never displace the default selection.
+const mergedT2IModels = [...t2iModels, ...NATIVE_T2I_DESCRIPTORS];
+const mergedI2IModels = [...i2iModels, ...NATIVE_I2I_DESCRIPTORS];
+
+// Native-aware wrappers around the models.js helpers. Native descriptors do
+// not live in the generated t2iModels/i2iModels arrays, so the legacy helpers
+// fall back to defaults when given a native id; these wrappers consult the C2
+// overlay first and defer to legacy behavior otherwise.
+function getAspectRatiosForT2I(modelId) {
+  if (isNativeModelId(modelId)) {
+    const m = nativeModelById(modelId);
+    return (m && m.aspectRatios) || ["1:1"];
+  }
+  return getAspectRatiosForModel(modelId);
+}
+function getResolutionsForT2I(modelId) {
+  if (isNativeModelId(modelId)) {
+    const m = nativeModelById(modelId);
+    return (m && m.imageSizes) || [];
+  }
+  return getResolutionsForModel(modelId);
+}
+function getQualityFieldForT2I(modelId) {
+  if (isNativeModelId(modelId)) {
+    const m = nativeModelById(modelId);
+    return m && m.imageSizes && m.imageSizes.length > 0 ? "imageSize" : null;
+  }
+  return getQualityFieldForModel(modelId);
+}
+function getAspectRatiosForI2INative(modelId) {
+  if (isNativeModelId(modelId)) {
+    const m = nativeModelById(modelId);
+    return (m && m.aspectRatios) || ["1:1"];
+  }
+  return getAspectRatiosForI2IModel(modelId);
+}
+function getResolutionsForI2INative(modelId) {
+  if (isNativeModelId(modelId)) {
+    const m = nativeModelById(modelId);
+    return (m && m.imageSizes) || [];
+  }
+  return getResolutionsForI2IModel(modelId);
+}
+function getQualityFieldForI2INative(modelId) {
+  if (isNativeModelId(modelId)) {
+    const m = nativeModelById(modelId);
+    return m && m.imageSizes && m.imageSizes.length > 0 ? "imageSize" : null;
+  }
+  return getQualityFieldForI2IModel(modelId);
+}
+function getMaxImagesForI2INative(modelId) {
+  if (isNativeModelId(modelId)) {
+    const m = nativeModelById(modelId);
+    return getNativeImageModelMaxSlotCount(m);
+  }
+  return getMaxImagesForI2IModel(modelId);
+}
+
+// Build a native gateway input reference from an existing URL string. Same-origin
+// native asset URLs are reduced to their opaque asset id; any other URL is passed
+// through so the gateway can resolve it server-side (SSRF-protected import path).
+function nativeInputFromUrl(url, role) {
+  if (typeof url !== "string" || !url) return null;
+  let assetId = url;
+  if (url.startsWith(NATIVE_ASSET_URL_PREFIX)) {
+    assetId = url.slice(NATIVE_ASSET_URL_PREFIX.length).split(/[?#]/)[0];
+  }
+  return { kind: "asset", assetId, role };
+}
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -37,7 +181,13 @@ async function downloadImage(url, filename) {
 
 // ─── UploadButton (inline picker) ───────────────────────────────────────────
 
-function UploadButton({ apiKey, maxImages, onSelect, onClear, initialUrls = [] }) {
+// Default uploader delegates to the legacy MuAPI upload path. The parent may
+// pass an `uploader` prop (file, onProgress) => Promise<url> to route uploads
+// through the native gateway when a native model is selected. Both return a
+// browser-renderable URL string, preserving the existing uploadedImageUrls shape.
+const defaultUploader = (apiKey, file, onProgress) => uploadFile(apiKey, file, onProgress);
+
+function UploadButton({ apiKey, maxImages, onSelect, onClear, initialUrls = [], uploader, nativeUpload = false }) {
   const [panelOpen, setPanelOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [selectedEntries, setSelectedEntries] = useState([]); // [{url, thumbnail}]
@@ -46,6 +196,34 @@ function UploadButton({ apiKey, maxImages, onSelect, onClear, initialUrls = [] }
   const fileInputRef = useRef(null);
   const panelRef = useRef(null);
   const triggerRef = useRef(null);
+
+  const selectedEntriesRef = useRef([]);
+  selectedEntriesRef.current = selectedEntries;
+
+  const fireOnSelect = useCallback(
+    (entries) => {
+      if (!entries.length) return;
+      const urls = entries.map((e) => e.url);
+      onSelect({ url: urls[0], urls, thumbnail: entries[0].url });
+    },
+    [onSelect],
+  );
+
+  const commitSelection = useCallback(
+    (entries, options = {}) => {
+      setSelectedEntries(entries);
+      selectedEntriesRef.current = entries;
+      if (entries.length === 0) {
+        onClear?.();
+      } else {
+        fireOnSelect(entries);
+      }
+      if (options.closePanel) {
+        setPanelOpen(false);
+      }
+    },
+    [onClear, fireOnSelect],
+  );
 
   // Close on outside click
   useEffect(() => {
@@ -74,6 +252,7 @@ function UploadButton({ apiKey, maxImages, onSelect, onClear, initialUrls = [] }
 
       const newEntries = initialUrls.map(url => ({ url }));
       setSelectedEntries(newEntries);
+      selectedEntriesRef.current = newEntries;
       
       // Also ensure they are in the history panel
       setUploadHistory(prev => {
@@ -83,6 +262,9 @@ function UploadButton({ apiKey, maxImages, onSelect, onClear, initialUrls = [] }
           .map(u => ({ id: `restored-${u}`, name: "Restored Image", url: u, progress: 100 }));
         return [...missing, ...prev];
       });
+    } else if (initialUrls && initialUrls.length === 0 && selectedEntries.length > 0) {
+      setSelectedEntries([]);
+      selectedEntriesRef.current = [];
     }
   }, [initialUrls]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -91,21 +273,17 @@ function UploadButton({ apiKey, maxImages, onSelect, onClear, initialUrls = [] }
     if (selectedEntries.length > maxImages) {
       const trimmed = selectedEntries.slice(0, maxImages);
       setSelectedEntries(trimmed);
-      if (trimmed.length === 0) onClear?.();
+      selectedEntriesRef.current = trimmed;
+      if (trimmed.length === 0) {
+        onClear?.();
+      } else {
+        fireOnSelect(trimmed);
+      }
     }
     if (fileInputRef.current) {
       fileInputRef.current.multiple = maxImages > 1;
     }
   }, [maxImages]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const fireOnSelect = useCallback(
-    (entries) => {
-      if (!entries.length) return;
-      const urls = entries.map((e) => e.url);
-      onSelect({ url: urls[0], urls, thumbnail: entries[0].url });
-    },
-    [onSelect],
-  );
 
   const handleFileChange = async (e) => {
     const files = Array.from(e.target.files);
@@ -123,12 +301,19 @@ function UploadButton({ apiKey, maxImages, onSelect, onClear, initialUrls = [] }
 
     setUploading(true);
     try {
-      const toUpload =
-        maxImages === 1
-          ? files.slice(0, 1)
-          : files.slice(0, maxImages - selectedEntries.length || 1);
+      const currentSelection = selectedEntriesRef.current;
+      let toUpload;
+      if (maxImages === 1) {
+        toUpload = files.slice(0, 1);
+      } else {
+        const spaceLeft = Math.max(0, maxImages - currentSelection.length);
+        if (spaceLeft === 0) {
+          return;
+        }
+        toUpload = files.slice(0, spaceLeft);
+      }
 
-      await Promise.all(
+      const uploadedUrls = await Promise.all(
         toUpload.map(async (file) => {
           const id = Date.now().toString() + Math.random();
 
@@ -137,7 +322,14 @@ function UploadButton({ apiKey, maxImages, onSelect, onClear, initialUrls = [] }
           setUploadHistory((prev) => [placeholder, ...prev]);
 
           try {
-            const uploadedUrl = await uploadFile(apiKey, file, (pct) => {
+            // uploader signature: (file, onProgress) => Promise<url string>.
+            // Native upload routing is enforced here too so a stale parent
+            // closure cannot fall back to the legacy MuAPI endpoint.
+            const uploadedUrl = await (
+              nativeUpload
+                ? async (file) => (await uploadNativeFile(file)).url
+                : uploader || ((file, onProgress) => defaultUploader(apiKey, file, onProgress))
+            )(file, (pct) => {
               setLastUploadProgress(pct);
               setUploadHistory((prev) =>
                 prev.map((h) => (h.id === id ? { ...h, progress: pct } : h)),
@@ -154,16 +346,7 @@ function UploadButton({ apiKey, maxImages, onSelect, onClear, initialUrls = [] }
               }),
             );
 
-            // Auto-select if there's room
-            if (selectedEntries.length < maxImages) {
-              const newEntry = { url: uploadedUrl };
-              setSelectedEntries((prev) => [...prev, newEntry]);
-
-              if (maxImages === 1) {
-                fireOnSelect([newEntry]);
-                setPanelOpen(false);
-              }
-            }
+            return uploadedUrl;
           } catch (err) {
             console.error("[UploadButton] Upload failed for", file.name, err);
             setUploadHistory((prev) => prev.filter((h) => h.id !== id));
@@ -171,6 +354,21 @@ function UploadButton({ apiKey, maxImages, onSelect, onClear, initialUrls = [] }
           }
         }),
       );
+
+      const baseSelection = selectedEntriesRef.current;
+      if (maxImages === 1) {
+        if (uploadedUrls.length > 0) {
+          const newEntry = { url: uploadedUrls[0] };
+          commitSelection([newEntry], { closePanel: true });
+        }
+      } else {
+        const newEntries = uploadedUrls.map(url => ({ url }));
+        const spaceLeft = maxImages - baseSelection.length;
+        if (spaceLeft > 0) {
+          const added = newEntries.slice(0, spaceLeft);
+          commitSelection([...baseSelection, ...added]);
+        }
+      }
     } catch (err) {
       alert(`Image upload failed: ${err.message}`);
     } finally {
@@ -188,21 +386,18 @@ function UploadButton({ apiKey, maxImages, onSelect, onClear, initialUrls = [] }
 
     if (maxImages === 1) {
       const newSelected = [{ url: entry.url, localUrl: entry.localUrl }];
-      setSelectedEntries(newSelected);
-      fireOnSelect(newSelected);
-      setPanelOpen(false);
+      commitSelection(newSelected, { closePanel: true });
     } else {
       let next;
       if (isSelected) {
         next = selectedEntries.filter((_, i) => i !== selIdx);
-        if (next.length === 0) onClear?.();
       } else {
         next = [
           ...selectedEntries,
           { url: entry.url, localUrl: entry.localUrl },
         ];
       }
-      setSelectedEntries(next);
+      commitSelection(next);
     }
   };
 
@@ -213,19 +408,18 @@ function UploadButton({ apiKey, maxImages, onSelect, onClear, initialUrls = [] }
 
     const next = selectedEntries.filter((s) => s.url !== entry.url);
     if (next.length !== selectedEntries.length) {
-      setSelectedEntries(next);
-      if (next.length === 0) onClear?.();
+      commitSelection(next);
     }
   };
 
   const handleDone = (e) => {
     e.stopPropagation();
-    fireOnSelect(selectedEntries);
-    setPanelOpen(false);
+    commitSelection(selectedEntries, { closePanel: true });
   };
 
   const reset = () => {
     setSelectedEntries([]);
+    selectedEntriesRef.current = [];
     setPanelOpen(false);
   };
 
@@ -881,6 +1075,11 @@ export default function ImageStudio({
       const urls = await Promise.all(
         toUpload.map(async (file) => {
           try {
+            // Route uploads through the native gateway when a native model is
+            // selected; legacy models keep using the MuAPI upload path.
+            if (isNativeModelId(selectedModelId)) {
+              return (await uploadNativeFile(file)).url;
+            }
             return await uploadFile(apiKey, file);
           } catch (err) {
             console.error(
@@ -913,19 +1112,36 @@ export default function ImageStudio({
   }, [droppedFiles, onFilesHandled, processDroppedImages]);
 
   // ── Derived: current model lists & helpers ───────────────────────────────
-  const currentModels = imageMode ? i2iModels : t2iModels;
+  // Use the merged (legacy + native) model lists for dropdown rendering. Native
+  // entries appear only as additive options appended after the existing models.
+  const currentModels = imageMode ? mergedI2IModels : mergedT2IModels;
   const currentAspectRatios = imageMode
-    ? getAspectRatiosForI2IModel(selectedModelId)
-    : getAspectRatiosForModel(selectedModelId);
+    ? getAspectRatiosForI2INative(selectedModelId)
+    : getAspectRatiosForT2I(selectedModelId);
   const currentResolutions = imageMode
-    ? getResolutionsForI2IModel(selectedModelId)
-    : getResolutionsForModel(selectedModelId);
+    ? getResolutionsForI2INative(selectedModelId)
+    : getResolutionsForT2I(selectedModelId);
   const currentQualityField = imageMode
-    ? getQualityFieldForI2IModel(selectedModelId)
-    : getQualityFieldForModel(selectedModelId);
+    ? getQualityFieldForI2INative(selectedModelId)
+    : getQualityFieldForT2I(selectedModelId);
   const showQualityBtn = currentResolutions.length > 0;
   const currentEffects = imageMode ? getEffectsForI2IModel(selectedModelId) : [];
   const showEffectBtn = currentEffects.length > 0;
+
+  // Uploader used by the inline UploadButton. Native models route uploads to the
+  // native gateway (no MuAPI key required); legacy models keep the MuAPI path.
+  // Signature: (file, onProgress) => Promise<url string>. onProgress is a no-op
+  // for the native path because the gateway does not report progress today.
+  const studioUploader = useCallback(
+    async (file, onProgress) => {
+      if (isNativeModelId(selectedModelId)) {
+        const r = await uploadNativeFile(file);
+        return r.url;
+      }
+      return uploadFile(apiKey, file, onProgress);
+    },
+    [apiKey, selectedModelId],
+  );
 
   // ── Textarea auto-resize ─────────────────────────────────────────────────
   const handleTextareaInput = () => {
@@ -943,6 +1159,22 @@ export default function ImageStudio({
       setUploadedImageUrls(newUrls);
 
       if (!imageMode) {
+        // If a native image model that also supports image-to-image is currently
+        // selected, keep it and just switch modes so the user's model choice is
+        // preserved. Native image models all support both T2I and I2I in V1.
+        if (isNativeModelId(selectedModelId)) {
+          const m = nativeModelById(selectedModelId);
+          if (
+            m &&
+            m.kind === "image" &&
+            Array.isArray(m.tasks) &&
+            m.tasks.includes("image-to-image")
+          ) {
+            setImageMode(true);
+            setMaxImages(getNativeImageModelMaxSlotCount(m));
+            return;
+          }
+        }
         const firstI2I = i2iModels[0];
         const ars = getAspectRatiosForI2IModel(firstI2I.id);
         const resolutions = getResolutionsForI2IModel(firstI2I.id);
@@ -956,12 +1188,32 @@ export default function ImageStudio({
         setMaxImages(getMaxImagesForI2IModel(firstI2I.id));
       }
     },
-    [imageMode],
+    [imageMode, selectedModelId],
   );
 
   const handleUploadClear = useCallback(() => {
     setUploadedImageUrls([]);
     setImageMode(false);
+    // If a native image model was selected and also supports text-to-image, keep
+    // it and just clear the reference images. Otherwise fall back to the default
+    // legacy T2I model, preserving the original behavior for non-native users.
+    if (isNativeModelId(selectedModelId)) {
+      const m = nativeModelById(selectedModelId);
+      if (
+        m &&
+        m.kind === "image" &&
+        Array.isArray(m.tasks) &&
+        m.tasks.includes("text-to-image")
+      ) {
+        const ars = (m && m.aspectRatios) || ["1:1"];
+        const imageSizes = (m && m.imageSizes) || [];
+        setSelectedAr(ars[0] || "1:1");
+        setSelectedQuality(imageSizes[0] || null);
+        setSelectedEffect("");
+        setMaxImages(1);
+        return;
+      }
+    }
     const firstT2I = t2iModels[0];
     const ars = getAspectRatiosForModel(firstT2I.id);
     const resolutions = getResolutionsForModel(firstT2I.id);
@@ -971,22 +1223,22 @@ export default function ImageStudio({
     setSelectedQuality(resolutions[0] || null);
     setSelectedEffect("");
     setMaxImages(1);
-  }, []);
+  }, [selectedModelId]);
 
   // ── Model selection ──────────────────────────────────────────────────────
   const handleModelSelect = (m) => {
     const ars = imageMode
-      ? getAspectRatiosForI2IModel(m.id)
-      : getAspectRatiosForModel(m.id);
+      ? getAspectRatiosForI2INative(m.id)
+      : getAspectRatiosForT2I(m.id);
     const resolutions = imageMode
-      ? getResolutionsForI2IModel(m.id)
-      : getResolutionsForModel(m.id);
+      ? getResolutionsForI2INative(m.id)
+      : getResolutionsForT2I(m.id);
     setSelectedModelId(m.id);
     setSelectedModelName(m.name);
     setSelectedAr(ars[0] || "1:1");
     setSelectedQuality(resolutions[0] || null);
     if (imageMode) {
-      setMaxImages(getMaxImagesForI2IModel(m.id));
+      setMaxImages(getMaxImagesForI2INative(m.id));
       const effects = getEffectsForI2IModel(m.id);
       setSelectedEffect(effects.length > 0 ? (getDefaultEffectForI2IModel(m.id) || effects[0]) : "");
     } else {
@@ -1046,6 +1298,38 @@ export default function ImageStudio({
     try {
       const results = await Promise.all(
         Array.from({ length: batchSize }).map(async () => {
+          // Native models route through the C2 facade (/api/native-media/v1/*)
+          // using a plain fetch client. No MuAPI key, cookie, or Google/Codex
+          // credential is sent from the browser. Existing MuAPI generation
+          // functions remain unchanged for non-native models.
+          if (isNativeModelId(selectedModelId)) {
+            const task = imageMode ? "image-to-image" : "text-to-image";
+            const parameters = { aspectRatio: selectedAr };
+            if (currentQualityField && selectedQuality) {
+              parameters[currentQualityField] = selectedQuality;
+            }
+            let inputs = [];
+            if (imageMode) {
+              // I2I: first uploaded image is the primary input; the rest are
+              // references, preserving existing images_list ordering.
+              inputs = uploadedImageUrls
+                .map((u, idx) =>
+                  nativeInputFromUrl(u, idx === 0 ? "input" : "reference"),
+                )
+                .filter(Boolean);
+            }
+            const res = await generateNativeMedia({
+              modelId: selectedModelId,
+              task,
+              prompt: prompt.trim() || "",
+              parameters,
+              inputs,
+            });
+            // generateNativeMedia returns { status, url, outputs, request_id,
+            // native, model, error? }. Map to the shape expected by the history
+            // loop below (which only needs res.url and an id).
+            return { id: res.request_id, ...res };
+          }
           if (imageMode) {
             const genParams = {
               model: selectedModelId,
@@ -1227,6 +1511,8 @@ export default function ImageStudio({
               onSelect={handleUploadSelect}
               onClear={handleUploadClear}
               initialUrls={uploadedImageUrls}
+              uploader={studioUploader}
+              nativeUpload={isNativeModelId(selectedModelId)}
             />
             <div className="flex-1 flex flex-col gap-2">
               <textarea

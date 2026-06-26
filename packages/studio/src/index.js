@@ -14,3 +14,6 @@ export { default as DesignAgentStudio } from './components/DesignAgentStudio';
 export { default as AppsStudio } from './components/AppsStudio';
 export { default as McpCliStudio } from './components/McpCliStudio';
 export * from './muapi';
+export * from './nativeModels';
+export * from './nativeModelRegistry';
+export * from './nativeMedia';
