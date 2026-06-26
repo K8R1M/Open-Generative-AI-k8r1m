@@ -28,6 +28,7 @@ const TABS = [
 ];
 
 const STORAGE_KEY = 'muapi_key';
+const KEYLESS_NATIVE_TABS = new Set(['image', 'video']);
 
 export default function StandaloneShell() {
   const params = useParams();
@@ -266,6 +267,10 @@ export default function StandaloneShell() {
     return <ApiKeyModal onSave={handleKeySave} />;
   }
 
+  if (!apiKey && !KEYLESS_NATIVE_TABS.has(activeTab)) {
+    return <ApiKeyModal onSave={handleKeySave} />;
+  }
+
   return (
     <div 
       className="h-screen bg-[#030303] flex flex-col overflow-hidden text-white relative"
@@ -413,7 +418,7 @@ export default function StandaloneShell() {
                    Active API Key
                 </label>
                 <div className="text-[13px] font-mono text-white/80">
-                  {apiKey.slice(0, 8)}••••••••••••••••
+                  {apiKey ? `${apiKey.slice(0, 8)}••••••••••••••••` : 'No API key saved'}
                 </div>
               </div>
             </div>

@@ -10,6 +10,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
 
 const { NATIVE_MODEL_IDS, loadNative } = require('./fixtures/nativeContract');
 
@@ -65,4 +66,16 @@ test('shell renders studios when native capabilities are usable without a key (p
     ? await registry.hasUsableNativeCapabilities({ apiKey: undefined, enabled: true })
     : ((await registry.getNativeCapabilities({ apiKey: undefined, enabled: true })).models || []).length > 0;
   assert.ok(usable, 'without a MuAPI key, usable native models must keep the shell rendered');
+});
+
+test('settings modal does not assume apiKey is a string', () => {
+  const source = fs.readFileSync('components/StandaloneShell.js', 'utf8');
+  assert.match(source, /apiKey\s*\?\s*`\$\{apiKey\.slice\(0,\s*8\)\}/);
+  assert.match(source, /No API key saved/);
+});
+
+test('keyless native mode only bypasses the API key modal for native-wired tabs', () => {
+  const source = fs.readFileSync('components/StandaloneShell.js', 'utf8');
+  assert.match(source, /KEYLESS_NATIVE_TABS\s*=\s*new Set\(\[['"]image['"],\s*['"]video['"]\]\)/);
+  assert.match(source, /if \(!apiKey && !KEYLESS_NATIVE_TABS\.has\(activeTab\)\)/);
 });
