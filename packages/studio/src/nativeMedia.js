@@ -11,7 +11,7 @@ import {
 const NATIVE_GENERATIONS_ENDPOINT = '/api/native-media/v1/generations';
 const NATIVE_UPLOADS_ENDPOINT = '/api/native-media/v1/uploads';
 const NATIVE_POLL_INTERVAL_MS = 2000;
-const NATIVE_POLL_TIMEOUT_MS = 220000;
+const NATIVE_POLL_TIMEOUT_MS = 440000;
 
 const PENDING_NATIVE_STATUSES = new Set(['created', 'queued', 'running']);
 const TERMINAL_NATIVE_STATUSES = new Set([

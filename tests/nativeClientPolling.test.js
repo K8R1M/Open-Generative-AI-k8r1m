@@ -158,7 +158,7 @@ test('native client default poll timeout is longer than legacy two-minute ceilin
             pollIntervalMs: 0,
           })
         ),
-      /timed out after 220000ms/i
+      /timed out after 440000ms/i
     );
   } finally {
     Date.now = realDateNow;
