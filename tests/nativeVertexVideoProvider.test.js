@@ -76,7 +76,7 @@ class FakeChild extends EventEmitter {
   }
 }
 
-function fakeSpawn({ writeMp4 = true, exitCode = 0, delayMs = 20, mediaBasename = null, emitMedia = true, writeRequestedMp4 = false }) {
+function fakeSpawn({ writeMp4 = true, exitCode = 0, delayMs = 20, mediaBasename = null, emitMedia = true, writeRequestedMp4 = false, stderrText = null }) {
   return (cmd, argv, opts) => {
     const child = new FakeChild(argv, opts);
     const outIdx = argv.indexOf('--output');
@@ -86,6 +86,7 @@ function fakeSpawn({ writeMp4 = true, exitCode = 0, delayMs = 20, mediaBasename 
       : requestedOutput;
     const timer = setTimeout(() => {
       try {
+        if (stderrText && child.stderr) child.stderr.emit('data', Buffer.from(stderrText));
         if (writeMp4 && outputPath) {
           fs.mkdirSync(path.dirname(outputPath), { recursive: true });
           if (writeRequestedMp4 && requestedOutput && requestedOutput !== outputPath) fs.writeFileSync(requestedOutput, MP4_STUB);
@@ -200,6 +201,20 @@ test('buildVertexVideoArgs: rejects unsupported model, task, duration, and last 
     }),
     /last frame requires a start frame/
   );
+  assert.throws(
+    () => vertex.buildVertexVideoArgs({
+      modelId: 'native.vertex.veo-3.1',
+      task: 'image-to-video',
+      prompt: 'p',
+      parameters: { durationSeconds: 4 },
+      outputPath: '/o.mp4',
+      inputPaths: [
+        { role: 'start', path: '/start.png' },
+        { role: 'last', path: '/end.png' },
+      ],
+    }),
+    /last frame requires 8s duration/
+  );
 });
 
 test('validateVertexVideoInputs: rejects unsafe inputs before provider calls', async () => {
@@ -229,6 +244,21 @@ test('validateVertexVideoInputs: rejects unsafe inputs before provider calls', a
       parameters: { durationSeconds: 8 },
     }),
     /exceeds max bytes/
+  );
+  await assert.rejects(
+    () => vertex.validateVertexVideoInputs({
+      task: 'image-to-video',
+      inputs: [
+        { kind: 'asset', assetId: 'start', role: 'first-frame' },
+        { kind: 'asset', assetId: 'end', role: 'last-frame' },
+      ],
+      resolvedFiles: [
+        { role: 'start', path: '/start.png', mime: 'image/png', size: 100 },
+        { role: 'last', path: '/end.png', mime: 'image/png', size: 100 },
+      ],
+      parameters: { durationSeconds: 4 },
+    }),
+    /last frame requires 8s duration/
   );
 });
 
@@ -319,7 +349,7 @@ test('live runner uses fixed python + script paths with shell:false', async () =
   assert.equal(captured.argv[0], vertex.VERTEX_VIDEO_SCRIPT);
   assert.equal(captured.opts.shell, false);
   assert.equal(captured.opts.detached, false);
-  assert.deepEqual(captured.opts.stdio, ['ignore', 'pipe', 'ignore']);
+  assert.deepEqual(captured.opts.stdio, ['ignore', 'pipe', 'pipe']);
   assert.equal(registerMeta.killGroup, false);
   assert.equal(captured.opts.env.GOOGLE_APPLICATION_CREDENTIALS, undefined);
   assert.equal(captured.opts.env.PATH, '/bin');
@@ -461,7 +491,7 @@ test('gateway.submitGeneration: live Veo returns after subprocess registration w
   assert.ok(typeof job.pid === 'number' && job.outputPath);
   assert.equal(job.subprocessProvider, 'vertex');
   assert.equal(scheduler.isTracked(job.id), true);
-  assert.deepEqual(captured.opts.stdio, ['ignore', 'pipe', 'ignore']);
+  assert.deepEqual(captured.opts.stdio, ['ignore', 'pipe', 'pipe']);
   await gateway.cancelGeneration(job.id);
 });
 
@@ -646,6 +676,34 @@ test('gateway.submitGeneration: cancel kills the live Vertex video subprocess di
   assert.equal(childSeen.killSignal, 'SIGTERM');
   assert.equal(scheduler.isTracked(job.id), false);
   assert.notEqual(outcome.status, 'completed');
+});
+
+test('gateway.submitGeneration: live Vertex video failures retain redacted provider stderr privately', async () => {
+  setLiveGate(true);
+  const prompt = 'secret-ish prompt text';
+  const job = await gateway.submitGeneration(
+    {
+      modelId: 'native.vertex.veo-3.1-fast',
+      task: 'text-to-video',
+      prompt,
+      parameters: { durationSeconds: 4, aspectRatio: '16:9', resolution: '720p' },
+      clientRequestId: 'c6-stderr-' + Date.now(),
+    },
+    {
+      liveVertex: true,
+      spawn: fakeSpawn({
+        writeMp4: false,
+        exitCode: 1,
+        delayMs: 15,
+        stderrText: `Vertex error in ${process.cwd()}: ${prompt}`,
+      }),
+    }
+  );
+  const settled = await pollStatus(job.id, (j) => j.status === 'INTERRUPTED_PROCESS');
+  assert.equal(settled.error, 'NONZERO_EXIT');
+  assert.match(settled.detail, /Vertex error/);
+  assert.match(settled.detail, /<repo>|<prompt>/);
+  assert.doesNotMatch(settled.detail, new RegExp(prompt));
 });
 
 test('vertexVideoProvider exports never expose credential paths or provider internals', () => {

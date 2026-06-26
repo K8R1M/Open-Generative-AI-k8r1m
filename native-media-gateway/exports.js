@@ -358,6 +358,7 @@ async function launchProviderWork(job, clean, options) {
       killGroup: meta.killGroup,
       outputPath: meta.outputPath,
       resolveOutputPath: meta.resolveOutputPath,
+      settlePatch: meta.settlePatch,
       expectedMime: meta.expectedMime,
       timeoutMs: meta.timeoutMs,
       onSettle: (id, patch) => onSubprocessSettle(id, patch, onEvent),

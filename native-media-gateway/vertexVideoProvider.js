@@ -85,6 +85,15 @@ function parseMediaStdout(stdout) {
   return match ? match[1].trim() : null;
 }
 
+function redactProviderText(text, { prompt } = {}) {
+  let out = String(text || '');
+  if (prompt) out = out.split(String(prompt)).join('<prompt>');
+  out = out.split(REPO_ROOT).join('<repo>');
+  const creds = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+  if (creds) out = out.split(String(creds)).join('<google-credentials>');
+  return out.slice(-4096);
+}
+
 function classifyRole(role) {
   if (START_ROLES.has(role)) return 'start';
   if (LAST_ROLES.has(role)) return 'last';
@@ -143,6 +152,9 @@ function buildVertexVideoArgs(opts) {
     }
   }
   if (lastUsed && !startUsed) throw new Error('Veo last frame requires a start frame');
+  if (lastUsed && duration !== CONSTRAINTS.referenceDurationSeconds) {
+    throw new Error(`Veo last frame requires ${CONSTRAINTS.referenceDurationSeconds}s duration`);
+  }
   if (referenceCount > CONSTRAINTS.maxReferences) throw new Error(`Veo reference images exceed maximum of ${CONSTRAINTS.maxReferences}`);
   if (referenceCount > 0 && duration !== CONSTRAINTS.referenceDurationSeconds) {
     throw new Error(`Veo reference images require ${CONSTRAINTS.referenceDurationSeconds}s duration`);
@@ -178,10 +190,13 @@ async function validateVertexVideoInputs(opts) {
   if (startCount > 1) throw new Error('Veo supports at most one start frame');
   if (lastCount > 1) throw new Error('Veo supports at most one last frame');
   if (lastCount > 0 && startCount === 0) throw new Error('Veo last frame requires a start frame');
+  const duration = getDuration(opts.parameters || {});
+  if (lastCount > 0 && duration !== constraints.referenceDurationSeconds) {
+    throw new Error(`Veo last frame requires ${constraints.referenceDurationSeconds}s duration`);
+  }
   if (referenceCount > constraints.maxReferences) {
     throw new Error(`Veo reference images exceed maximum of ${constraints.maxReferences} (got ${referenceCount})`);
   }
-  const duration = getDuration(opts.parameters || {});
   if (referenceCount > 0 && duration !== constraints.referenceDurationSeconds) {
     throw new Error(`Veo reference images require ${constraints.referenceDurationSeconds}s duration`);
   }
@@ -261,7 +276,7 @@ async function runVertexVideoProvider(job, clean, ctx, opts = {}) {
   const spawnFn = opts.spawn || spawn;
   const child = spawnFn(VERTEX_VIDEO_PYTHON, argv, {
     detached: false,
-    stdio: ['ignore', 'pipe', 'ignore'],
+    stdio: ['ignore', 'pipe', 'pipe'],
     env,
     shell: false,
   });
@@ -276,6 +291,13 @@ async function runVertexVideoProvider(job, clean, ctx, opts = {}) {
       if (stdout.length > 64 * 1024) stdout = stdout.slice(-64 * 1024);
     });
   }
+  let stderr = '';
+  if (child.stderr) {
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk.toString();
+      if (stderr.length > 64 * 1024) stderr = stderr.slice(-64 * 1024);
+    });
+  }
 
   const timeoutMs = Math.max(1000, Number(opts.timeoutMs || ctx.timeoutMs || DEFAULT_TIMEOUT_MS));
   ctx.register(child, {
@@ -284,6 +306,10 @@ async function runVertexVideoProvider(job, clean, ctx, opts = {}) {
     timeoutMs,
     killGroup: false,
     resolveOutputPath: () => parseMediaStdout(stdout) || outputPath,
+    settlePatch: (patch) => {
+      if (!stderr || patch.status === 'completed') return null;
+      return { detail: redactProviderText(stderr, { prompt: clean.prompt }) };
+    },
   });
 
   return { child, outputPath, expectedMime: 'video/mp4', argv, env };
@@ -302,6 +328,7 @@ module.exports = {
   liveVertexEnabled,
   buildEnv,
   parseMediaStdout,
+  redactProviderText,
   buildVertexVideoArgs,
   validateVertexVideoInputs,
   resolveInputAssets,

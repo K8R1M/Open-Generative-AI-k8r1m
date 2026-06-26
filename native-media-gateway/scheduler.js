@@ -43,6 +43,7 @@ function Tracking(init) {
     pgid: init.pgid,
     outputPath: init.outputPath,
     resolveOutputPath: init.resolveOutputPath,
+    settlePatch: init.settlePatch,
     expectedMime: init.expectedMime,
     child: init.child,
     killGroup: init.killGroup !== false,
@@ -169,6 +170,7 @@ function registerSubprocess(jobId, opts) {
     pgid: opts.pgid != null ? opts.pgid : child.pid,
     outputPath: opts.outputPath || null,
     resolveOutputPath: typeof opts.resolveOutputPath === 'function' ? opts.resolveOutputPath : null,
+    settlePatch: typeof opts.settlePatch === 'function' ? opts.settlePatch : null,
     expectedMime: opts.expectedMime || null,
     child,
     killGroup: opts.killGroup,
@@ -273,6 +275,14 @@ function sniffMime(bytes) {
 async function settle(t, patch) {
   if (t.settled || !isCurrent(t)) return;
   t.settled = true;
+  if (typeof t.settlePatch === 'function') {
+    try {
+      const extra = t.settlePatch(patch);
+      if (extra && typeof extra === 'object') patch = { ...patch, ...extra };
+    } catch {
+      /* diagnostics must never block terminal settlement */
+    }
+  }
   if (t.timeout) {
     clearTimeout(t.timeout);
     t.timeout = null;

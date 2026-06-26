@@ -31,3 +31,12 @@ test('VideoStudio native I2V maps start, end, and references structurally', () =
   assert.match(source, /referenceImagesEnabled \? Math\.max\(0, uploadedImageUrls\.length - 1\) : 0/);
   assert.match(source, /referenceDurationSeconds \|\| 8/);
 });
+
+test('VideoStudio blocks Veo last-frame submissions unless duration is 8s', () => {
+  assert.match(source, /uploadedEndImageUrl && Number\(selectedDuration\) !== requiredDuration/);
+  assert.match(source, /Veo last frame requires \$\{requiredDuration\}s duration/);
+});
+
+test('VideoStudio hover preview ignores browser play aborts', () => {
+  assert.match(source, /onMouseOver=\{\(e\) => e\.currentTarget\.play\(\)\.catch\(\(\) => \{\}\)\}/);
+});

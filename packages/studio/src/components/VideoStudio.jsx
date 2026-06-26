@@ -1075,6 +1075,10 @@ export default function VideoStudio({
       const model = nativeModelById(selectedModel);
       const refCount = model?.referenceImagesEnabled ? Math.max(0, uploadedImageUrls.length - 1) : 0;
       const requiredDuration = model?.referenceDurationSeconds || 8;
+      if (uploadedEndImageUrl && Number(selectedDuration) !== requiredDuration) {
+        alert(`Veo last frame requires ${requiredDuration}s duration.`);
+        return;
+      }
       if (refCount > 0 && Number(selectedDuration) !== requiredDuration) {
         alert(`Veo reference images require ${requiredDuration}s duration.`);
         return;
@@ -1427,7 +1431,7 @@ export default function VideoStudio({
                     loop
                     muted
                     playsInline
-                    onMouseOver={(e) => e.target.play()}
+                    onMouseOver={(e) => e.currentTarget.play().catch(() => {})}
                     onMouseOut={(e) => {
                       e.target.pause();
                       e.target.currentTime = 0;
