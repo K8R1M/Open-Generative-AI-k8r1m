@@ -48,8 +48,10 @@ const ENV_ALLOWLIST = new Set([
   'GOOGLE_CLOUD_PROJECT',
 ]);
 
+const GATED_GOOGLE_ADC_ENV = 'GOOGLE_APPLICATION_CREDENTIALS';
+const GATED_GOOGLE_ADC_ALLOW_ENV = 'NATIVE_MEDIA_ALLOW_GOOGLE_APPLICATION_CREDENTIALS';
+
 const ENV_DENYLIST = new Set([
-  'GOOGLE_APPLICATION_CREDENTIALS',
   'GEMINI_API_KEY',
   'GEMINI_API_KEY_SECONDARY',
   'GOOGLE-api-key',
@@ -75,6 +77,14 @@ function buildEnv(baseEnv) {
     if (value === undefined || value === null) continue;
     if (ENV_DENYLIST.has(key)) continue;
     env[key] = String(value);
+  }
+  if (
+    src[GATED_GOOGLE_ADC_ALLOW_ENV] === '1' &&
+    typeof src[GATED_GOOGLE_ADC_ENV] === 'string' &&
+    src[GATED_GOOGLE_ADC_ENV]
+  ) {
+    env[GATED_GOOGLE_ADC_ALLOW_ENV] = '1';
+    env[GATED_GOOGLE_ADC_ENV] = src[GATED_GOOGLE_ADC_ENV];
   }
   return env;
 }

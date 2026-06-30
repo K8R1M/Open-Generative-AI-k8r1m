@@ -149,6 +149,34 @@ Open Generative AI is a free, open-source AI image, video, cinema, and lip sync 
 
 For a deep dive into the technical architecture and the philosophy behind the "Infinite Budget" cinema workflow, see our [comprehensive guide and roadmap](https://medium.com/@anilmatcha/).
 
+## Native Media Worker Operations
+
+This fork can run selected native providers through the loopback native media
+gateway instead of the MuAPI proxy. The Studio app talks to
+`/api/native-media/v1/*`, which proxies to the local worker
+(`native-media-gateway/server.js`, usually on `127.0.0.1:19334`). Native models
+currently include Vertex Nano Banana, Vertex Veo, and Codex GPT Image.
+
+For durable systemd deployments, Vertex subprocesses use a narrow environment
+allowlist. `GOOGLE_APPLICATION_CREDENTIALS` is forwarded to the Python wrappers
+only when the worker environment also sets
+`NATIVE_MEDIA_ALLOW_GOOGLE_APPLICATION_CREDENTIALS=1`. This keeps browser input,
+API keys, cookies, and arbitrary environment variables out of child processes
+while still allowing a trusted service-account JSON configured in the worker
+unit to survive restarts. If Vertex jobs fail immediately with a
+reauthentication error, verify the worker unit has both
+`GOOGLE_CLOUD_PROJECT` and the gated service-account ADC variables, then restart
+only the native worker.
+
+Veo may return a completed operation with no video when Vertex AI filters the
+result under its usage guidelines (`rai_media_filtered_count` /
+`rai_media_filtered_reasons`). That is a provider policy outcome, not a worker
+crash or systemd credential failure. The gateway stores the detailed provider
+stderr privately, redacts paths/prompts/credentials, and exposes a safe public
+message such as: "Veo could not generate the video because Vertex AI filtered
+the result under its usage guidelines." Retrying the exact same prompt and input
+image may be filtered again; use a different input image or rephrase the prompt.
+
 ## ⚡ Local Model Inference (Desktop App Only)
 
 The desktop app supports **two independent local engines**. Pick whichever fits the machine you actually run on:

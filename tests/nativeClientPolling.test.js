@@ -131,6 +131,36 @@ test('generateNativeMedia prefers safe terminal message over provider error code
   );
 });
 
+test('generateNativeMedia surfaces safe Vertex auth message over provider error code', async () => {
+  const impl = await loadNative('packages/studio/src/nativeMedia.js', 'safe terminal auth message');
+  let calls = 0;
+  const fetchImpl = async () => {
+    calls += 1;
+    if (calls === 1) return response({ id: 'job-auth', status: 'running' });
+    return response({
+      id: 'job-auth',
+      status: 'INTERRUPTED_PROCESS',
+      error: 'NONZERO_EXIT',
+      message: 'Vertex authentication failed before generation. The native worker needs valid Google Application Default Credentials or a configured service account.',
+    });
+  };
+
+  await assert.rejects(
+    () =>
+      withMockedBrowserFetch(fetchImpl, () =>
+        impl.generateNativeMedia({
+          modelId: 'native.vertex.veo-3.1-fast',
+          task: 'image-to-video',
+          prompt: 'x',
+          clientRequestId: 'req-auth',
+          pollIntervalMs: 0,
+          pollTimeoutMs: 50,
+        })
+      ),
+    /Vertex authentication failed before generation/
+  );
+});
+
 test('generateNativeMedia times out bounded native polling', async () => {
   const impl = await loadNative('packages/studio/src/nativeMedia.js', 'I1 native client polling');
   let calls = 0;

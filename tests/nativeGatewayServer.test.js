@@ -72,6 +72,53 @@ test('publicJob exposes safe Vertex policy failures without private diagnostics'
   );
 });
 
+test('publicJob exposes safe Vertex RAI filtered no-output failures', () => {
+  const job = publicJob({
+    id: 'job-rai-filtered',
+    status: 'INTERRUPTED_PROCESS',
+    error: 'NONZERO_EXIT',
+    detail: `RuntimeError: No video generated. Operation details: {
+      "response": {
+        "rai_media_filtered_count": 1,
+        "rai_media_filtered_reasons": [
+          "1 videos were filtered out because they violated Vertex AI's usage guidelines. You will not be charged for blocked videos. Try rephrasing the prompt. If you think this was an error, send feedback. Support codes: 15236754"
+        ]
+      }
+    }`,
+    outputPath: '/tmp/private/output.mp4',
+    pid: 123,
+  });
+
+  assert.equal(job.detail, undefined);
+  assert.equal(job.outputPath, undefined);
+  assert.equal(job.pid, undefined);
+  assert.equal(job.error, 'NONZERO_EXIT');
+  assert.equal(
+    job.message,
+    'Veo could not generate the video because Vertex AI filtered the result under its usage guidelines. Try rephrasing the prompt or using a different input image. Support code: 15236754.'
+  );
+});
+
+test('publicJob exposes safe Vertex auth failures without private diagnostics', () => {
+  const job = publicJob({
+    id: 'job-auth',
+    status: 'INTERRUPTED_PROCESS',
+    error: 'NONZERO_EXIT',
+    detail: 'google.auth.exceptions.RefreshError: Reauthentication is needed. Please run `gcloud auth application-default login` to reauthenticate.',
+    outputPath: '/tmp/private/output.mp4',
+    pid: 123,
+  });
+
+  assert.equal(job.detail, undefined);
+  assert.equal(job.outputPath, undefined);
+  assert.equal(job.pid, undefined);
+  assert.equal(job.error, 'NONZERO_EXIT');
+  assert.equal(
+    job.message,
+    'Vertex authentication failed before generation. The native worker needs valid Google Application Default Credentials or a configured service account.'
+  );
+});
+
 test('native gateway support for range and suffix range requests', async (t) => {
   const server = createServer();
   const port = await listen(server);

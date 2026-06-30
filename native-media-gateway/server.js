@@ -37,9 +37,18 @@ function safeError(error) {
 function publicFailureMessage(job) {
   const detail = String(job && job.detail || '');
   if (!detail) return null;
+  const support = /Support codes?:\s*([0-9,\s]+)/i.exec(detail);
   if (/input image violates Vertex AI'?s usage guidelines/i.test(detail)) {
-    const support = /Support codes?:\s*([0-9,\s]+)/i.exec(detail);
     return `Veo could not generate the video because the input image violates Vertex AI usage guidelines.${support ? ` Support code: ${support[1].trim()}.` : ''}`;
+  }
+  if (
+    /rai_media_filtered/i.test(detail) ||
+    /videos? (?:were|was) filtered out because (?:they|it) violated Vertex AI'?s usage guidelines/i.test(detail)
+  ) {
+    return `Veo could not generate the video because Vertex AI filtered the result under its usage guidelines. Try rephrasing the prompt or using a different input image.${support ? ` Support code: ${support[1].trim()}.` : ''}`;
+  }
+  if (/Reauthentication is needed|gcloud auth application-default login|RefreshError/i.test(detail)) {
+    return 'Vertex authentication failed before generation. The native worker needs valid Google Application Default Credentials or a configured service account.';
   }
   return null;
 }

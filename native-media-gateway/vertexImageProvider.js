@@ -3,7 +3,9 @@
 // C5 — Vertex image provider adapter for the Native Media Gateway (V1).
 //
 // It is NOT a raw Vertex/GCS transport. It spawns the wrapper with `shell:false`,
-// fixed executable paths, an environment allowlist (no credential paths), and
+// fixed executable paths, and a narrow environment allowlist. Service-account
+// ADC may pass only when the worker explicitly opts in with
+// `NATIVE_MEDIA_ALLOW_GOOGLE_APPLICATION_CREDENTIALS=1`.
 // registers the resulting subprocess with the C1b single-host scheduler so
 // cancel/timeout/restart reconciliation reuse the same hooks as the fake runner.
 //
@@ -13,8 +15,8 @@
 // that env gate is enabled.
 //
 // No service-account JSON, GCS bucket, or Google auth header is read, logged, or
-// surfaced here. The wrapper loads its own managed credentials from its own .env;
-// this adapter passes only an operational env allowlist through to the child.
+// surfaced here. The wrapper loads managed credentials from its own .env or from
+// the gated worker env; browser/client input can never supply credentials.
 
 const path = require('node:path');
 const fsp = require('node:fs/promises');
@@ -54,10 +56,9 @@ const PRIMARY_ROLES = new Set(['input', 'image', 'first-frame', 'start-frame']);
 const REFERENCE_ROLES = new Set(['reference']);
 const ALLOWED_ROLES = new Set([...PRIMARY_ROLES, ...REFERENCE_ROLES]);
 
-// Environment variables passed through to the wrapper subprocess. The wrapper
-// loads its own managed Vertex credentials from its own .env, so credential
-// paths/tokens are intentionally excluded here — they never reach the child via
-// this adapter and never appear in logs or browser responses.
+// Environment variables passed through to the wrapper subprocess. Operational
+// values are always allowlisted. Service-account ADC is allowed only from a
+// trusted worker env that sets NATIVE_MEDIA_ALLOW_GOOGLE_APPLICATION_CREDENTIALS.
 const ENV_ALLOWLIST = new Set([
   'PATH',
   'HOME',
@@ -74,10 +75,12 @@ const ENV_ALLOWLIST = new Set([
   'GOOGLE_CLOUD_PROJECT',
 ]);
 
-// Names that must NEVER be passed through even if they somehow appear in the
-// allowlist (defensive belt-and-braces; the allowlist build skips them too).
+const GATED_GOOGLE_ADC_ENV = 'GOOGLE_APPLICATION_CREDENTIALS';
+const GATED_GOOGLE_ADC_ALLOW_ENV = 'NATIVE_MEDIA_ALLOW_GOOGLE_APPLICATION_CREDENTIALS';
+
+// Names that must NEVER be passed through. GOOGLE_APPLICATION_CREDENTIALS is
+// handled separately by the explicit gated path above.
 const ENV_DENYLIST = new Set([
-  'GOOGLE_APPLICATION_CREDENTIALS',
   'GEMINI_API_KEY',
   'GEMINI_API_KEY_SECONDARY',
   'GOOGLE-api-key',
@@ -106,6 +109,14 @@ function buildEnv(baseEnv) {
     if (ENV_DENYLIST.has(key)) continue;
     env[key] = String(value);
   }
+  if (
+    src[GATED_GOOGLE_ADC_ALLOW_ENV] === '1' &&
+    typeof src[GATED_GOOGLE_ADC_ENV] === 'string' &&
+    src[GATED_GOOGLE_ADC_ENV]
+  ) {
+    env[GATED_GOOGLE_ADC_ALLOW_ENV] = '1';
+    env[GATED_GOOGLE_ADC_ENV] = src[GATED_GOOGLE_ADC_ENV];
+  }
   return env;
 }
 
@@ -116,6 +127,16 @@ function parseMediaStdout(stdout) {
   if (!stdout || typeof stdout !== 'string') return null;
   const match = stdout.match(/MEDIA:(.+)/);
   return match ? match[1].trim() : null;
+}
+
+function redactProviderText(text, { prompt, outputPath } = {}) {
+  let out = String(text || '');
+  if (prompt) out = out.split(String(prompt)).join('<prompt>');
+  if (outputPath) out = out.split(String(outputPath)).join('<output>');
+  out = out.split(REPO_ROOT).join('<repo>');
+  const creds = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+  if (creds) out = out.split(String(creds)).join('<google-credentials>');
+  return out.slice(-4096);
 }
 
 // Resolve the role of an input into either 'primary' or 'reference'. Unknown
@@ -306,7 +327,7 @@ async function runVertexImageProvider(job, clean, ctx, opts = {}) {
 
   const child = spawnFn(VERTEX_IMAGE_PYTHON, argv, {
     detached: false,
-    stdio: ['ignore', 'pipe', 'ignore'],
+    stdio: ['ignore', 'pipe', 'pipe'],
     env,
     shell: false,
   });
@@ -324,6 +345,13 @@ async function runVertexImageProvider(job, clean, ctx, opts = {}) {
       if (stdout.length > 64 * 1024) stdout = stdout.slice(-64 * 1024);
     });
   }
+  let stderr = '';
+  if (child.stderr) {
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk.toString();
+      if (stderr.length > 64 * 1024) stderr = stderr.slice(-64 * 1024);
+    });
+  }
 
   const timeoutMs = Math.max(1000, Number(opts.timeoutMs || ctx.timeoutMs || DEFAULT_TIMEOUT_MS));
   ctx.register(child, {
@@ -333,6 +361,10 @@ async function runVertexImageProvider(job, clean, ctx, opts = {}) {
     killGroup: false,
     // Prefer wrapper MEDIA stdout when present; fall back to requested --output.
     resolveOutputPath: () => parseMediaStdout(stdout) || outputPath,
+    settlePatch: (patch) => {
+      if (!stderr || patch.status === 'completed') return null;
+      return { detail: redactProviderText(stderr, { prompt: clean.prompt, outputPath }) };
+    },
   });
 
   return { child, outputPath, expectedMime: 'image/png', argv, env };
@@ -351,6 +383,7 @@ module.exports = {
   liveVertexEnabled,
   buildEnv,
   parseMediaStdout,
+  redactProviderText,
   buildVertexImageArgs,
   validateVertexImageInputs,
   resolveInputAssets,

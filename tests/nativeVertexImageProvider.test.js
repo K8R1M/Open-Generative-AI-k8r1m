@@ -2,8 +2,8 @@
 // Native media `genai-image` wrapper.
 //
 // Covers: command construction (pure), input resolution + validation (SSRF,
-// MIME, size, reference count), environment allowlist (no credential passthrough),
-// MEDIA: stdout parsing, and the live runner integration through the C1b
+// MIME, size, reference count), environment allowlist (credential passthrough
+// only behind the trusted worker ADC gate), MEDIA: stdout parsing, and the live runner integration through the C1b
 // scheduler hooks using a *fake* spawned subprocess that writes a verified PNG
 // to the requested output path. No live Vertex call is ever made.
 
@@ -366,11 +366,12 @@ test('resolveInputAssets: rejects missing asset before provider call', async () 
 
 // ---------------------------------------------------------- environment boundary
 
-test('buildEnv: copies only allowlisted keys and never credentials', () => {
+test('buildEnv: copies only allowlisted keys and drops credentials unless worker ADC gate is set', () => {
   const env = vertex.buildEnv({
     PATH: '/usr/bin',
     HOME: '/h',
     GOOGLE_APPLICATION_CREDENTIALS: '/secret/sa.json',
+    NATIVE_MEDIA_ALLOW_GOOGLE_APPLICATION_CREDENTIALS: '0',
     GEMINI_API_KEY: 'AIza-secret',
     GOOGLE_CLOUD_PROJECT: 'proj-x',
     RANDOM_BAD: 'nope',
@@ -378,9 +379,25 @@ test('buildEnv: copies only allowlisted keys and never credentials', () => {
   assert.equal(env.PATH, '/usr/bin');
   assert.equal(env.HOME, '/h');
   assert.equal(env.GOOGLE_CLOUD_PROJECT, 'proj-x');
-  assert.equal(env.GOOGLE_APPLICATION_CREDENTIALS, undefined, 'service-account path must never be passed through');
+  assert.equal(env.GOOGLE_APPLICATION_CREDENTIALS, undefined, 'service-account path must require the worker ADC gate');
+  assert.equal(env.NATIVE_MEDIA_ALLOW_GOOGLE_APPLICATION_CREDENTIALS, undefined);
   assert.equal(env.GEMINI_API_KEY, undefined, 'API keys must never be passed through');
   assert.equal(env.RANDOM_BAD, undefined, 'non-allowlisted env must not leak to the wrapper child');
+});
+
+test('buildEnv: passes service-account ADC only when the trusted worker gate is set', () => {
+  const env = vertex.buildEnv({
+    PATH: '/usr/bin',
+    GOOGLE_CLOUD_PROJECT: 'proj-x',
+    GOOGLE_APPLICATION_CREDENTIALS: '/service/accounts/native.json',
+    NATIVE_MEDIA_ALLOW_GOOGLE_APPLICATION_CREDENTIALS: '1',
+    GEMINI_API_KEY: 'AIza-secret',
+  });
+  assert.equal(env.PATH, '/usr/bin');
+  assert.equal(env.GOOGLE_CLOUD_PROJECT, 'proj-x');
+  assert.equal(env.GOOGLE_APPLICATION_CREDENTIALS, '/service/accounts/native.json');
+  assert.equal(env.NATIVE_MEDIA_ALLOW_GOOGLE_APPLICATION_CREDENTIALS, '1');
+  assert.equal(env.GEMINI_API_KEY, undefined);
 });
 
 test('buildVertexImageArgs: argv never carries credential flags or service-account paths', () => {
@@ -422,9 +439,85 @@ test('live runner uses fixed python + script paths with shell:false', async () =
   assert.equal(captured.argv[0], vertex.VERTEX_IMAGE_SCRIPT, 'must use the fixed wrapper script path');
   assert.equal(captured.opts.shell, false, 'must spawn with shell:false');
   assert.equal(captured.opts.detached, false, 'must not detach Vertex wrappers under the Next route');
+  assert.deepEqual(captured.opts.stdio, ['ignore', 'pipe', 'pipe']);
   assert.equal(registerMeta.killGroup, false, 'non-detached Vertex wrappers must use child/PID cancellation');
-  assert.equal(captured.opts.env.GOOGLE_APPLICATION_CREDENTIALS, undefined, 'env allowlist must drop service-account paths');
+  assert.equal(captured.opts.env.GOOGLE_APPLICATION_CREDENTIALS, undefined, 'env allowlist must drop service-account paths unless gated');
   assert.equal(captured.opts.env.PATH, '/bin', 'allowlisted operational env must pass through');
+});
+
+test('live runner forwards gated worker service-account ADC env to the wrapper child', async () => {
+  let captured;
+  const spawnProbe = (cmd, argv, opts) => {
+    captured = { cmd, argv, opts };
+    const child = new FakeChild(argv, opts);
+    setTimeout(() => child.emit('exit', 0, null), 5);
+    return child;
+  };
+  await vertex.runVertexImageProvider(
+    { id: 'probe-adc-' + Date.now() },
+    { modelId: 'native.vertex.nano-banana-pro', task: 'text-to-image', prompt: 'p', parameters: {}, inputs: [] },
+    {
+      register: () => {},
+      getAsset: async () => null,
+      tmpDir: path.join(TEST_ROOT, 'tmp'),
+    },
+    {
+      spawn: spawnProbe,
+      env: {
+        PATH: '/bin',
+        GOOGLE_CLOUD_PROJECT: 'proj-x',
+        GOOGLE_APPLICATION_CREDENTIALS: '/service/accounts/native.json',
+        NATIVE_MEDIA_ALLOW_GOOGLE_APPLICATION_CREDENTIALS: '1',
+      },
+    }
+  );
+  assert.equal(captured.opts.env.GOOGLE_APPLICATION_CREDENTIALS, '/service/accounts/native.json');
+  assert.equal(captured.opts.env.NATIVE_MEDIA_ALLOW_GOOGLE_APPLICATION_CREDENTIALS, '1');
+  assert.equal(captured.opts.env.GOOGLE_CLOUD_PROJECT, 'proj-x');
+});
+
+test('runVertexImageProvider: live Vertex image failures retain redacted provider stderr privately', async () => {
+  const rid = 'c5-stderr-' + Date.now();
+  const prompt = 'secret-ish image prompt';
+  const settled = [];
+  const ctx = {
+    scheduler,
+    tmpDir: path.join(TEST_ROOT, 'tmp'),
+    getAsset: gateway.getAsset,
+    register: (child, meta) =>
+      scheduler.registerSubprocess(rid, {
+        child,
+        provider: 'vertex',
+        outputPath: meta.outputPath,
+        expectedMime: meta.expectedMime,
+        timeoutMs: meta.timeoutMs,
+        resolveOutputPath: meta.resolveOutputPath,
+        settlePatch: meta.settlePatch,
+        onSettle: async (id, patch) => settled.push(patch),
+        onRelease: () => scheduler.releaseSlot('vertex', id),
+        onDrain: () => {},
+      }),
+  };
+  const spawnWithStderr = (cmd, argv, opts) => {
+    const child = new FakeChild(argv, opts);
+    setTimeout(() => {
+      child.stderr.emit('data', Buffer.from(`Vertex image error in ${process.cwd()}: ${prompt}`));
+      child.emit('exit', 1, null);
+    }, 10);
+    return child;
+  };
+  await vertex.runVertexImageProvider(
+    { id: rid },
+    { modelId: 'native.vertex.nano-banana-pro', task: 'text-to-image', prompt, parameters: {}, inputs: [] },
+    ctx,
+    { spawn: spawnWithStderr }
+  );
+  await waitFor(() => settled.length > 0, { timeoutMs: 2000 });
+  assert.equal(settled[0].status, 'INTERRUPTED_PROCESS');
+  assert.equal(settled[0].error, 'NONZERO_EXIT');
+  assert.match(settled[0].detail, /Vertex image error/);
+  assert.match(settled[0].detail, /<repo>|<prompt>/);
+  assert.doesNotMatch(settled[0].detail, new RegExp(prompt));
 });
 
 test('default image wrapper paths are repo-local', () => {
