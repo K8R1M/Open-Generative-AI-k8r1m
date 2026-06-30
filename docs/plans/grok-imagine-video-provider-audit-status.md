@@ -51,4 +51,17 @@ Last updated: 2026-06-30
 - Failed/no-report runs closed on the Multica board:
   - wrong GLM provider path issue `MER-183`
   - Gemini 3.5 Flash issue `MER-184`
-- Board cleanup check: no in-progress issues remained after closing the audit issues.
+
+Second audit round requested by Karim:
+
+- `Grok 4.3 General`: issue `MER-187`, run `8e105a3d-a31e-4eca-9e0a-25b9bc8d7794`, verdict `APPROVE`.
+- `Gemini 3.5 Flash High - General`: issue `MER-189`, run `14c550ac-e562-408f-b83b-5fa0bf9b93a8`, verdict `APPROVE_WITH_NOTES`.
+- `GLM 5.2 - Opencode`: issue `MER-188`, run `00e554f0-b4c1-4d89-a23e-9a7b955e6b7f`, no usable audit report; closed.
+- `GLM 5.2 - Opencode` retry: issue `MER-190`, run `3988eb0e-cc77-4c4d-9017-9dc34b264715`, verdict `APPROVE_WITH_NOTES`.
+- Codex verification before amendment:
+  - confirmed `writeJsonAtomic()` exists but there is no global `jobs.json` mutation queue, so the concurrent read-modify-write warning is valid
+  - confirmed `persistJobPatch()` and `submitGenerationUnlocked()` both mutate `jobs.json`
+  - confirmed Studio card overlays currently have fullscreen/download actions and no copy/delete action
+  - confirmed `navigator.clipboard` needs a safe unavailable-path for HTTP IP/Tailscale access
+- Accepted amendments: jobs write serialization, tombstone-first delete, missing-asset tombstone recovery, opaque cursor with `jobId` tiebreak, MIME-over-task kind precedence, server-authoritative `deletable`, explicit private-field exclusions, local-only legacy removal, safe clipboard fallback, key-merge migration guidance, and expanded tests.
+- Rejected as V1 overbuild: database migration, WebSockets/gallery push sync, source upload cleanup, bespoke auth framework only for this endpoint, and client-side server-delete policy derivation.
