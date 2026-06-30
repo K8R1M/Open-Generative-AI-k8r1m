@@ -37,6 +37,7 @@ const NATIVE_MODEL_IDS = [
   'native.vertex.veo-3.1',
   'native.vertex.veo-3.1-fast',
   'native.codex.gpt-image-2',
+  'native.grok.imagine-video',
 ];
 
 const NATIVE_MODEL_DESCRIPTORS = [
@@ -70,6 +71,12 @@ const NATIVE_MODEL_DESCRIPTORS = [
     provider: 'codex',
     tasks: ['text-to-image', 'image-to-image'],
   },
+  {
+    id: 'native.grok.imagine-video',
+    label: 'Grok Imagine Video (Server · Grok CLI)',
+    provider: 'grok',
+    tasks: ['image-to-video'],
+  },
 ];
 
 const NATIVE_CAPABILITY_CONSTRAINTS = {
@@ -87,6 +94,12 @@ const NATIVE_CAPABILITY_CONSTRAINTS = {
   veoMaxReferenceImages: 3,
   veoReferenceDurationSeconds: 8,
   codexConcurrency: 1,
+  grokDurationsSeconds: [6, 10],
+  grokResolutions: ['480p', '720p'],
+  grokMaxReferenceImages: 6,
+  grokSupportsAspectRatio: false,
+  grokSupportsAudioToggle: false,
+  grokSupportsLastFrame: false,
 };
 
 const NATIVE_REQUEST_ENVELOPE = {
@@ -126,6 +139,7 @@ const NATIVE_CREDENTIAL_DENYLIST = {
     'google_application_credentials',
     'x-goog-api-key',
     'x-codex-auth',
+    'x-grok-auth',
   ],
   bodyFields: [
     'apiKey',
@@ -137,6 +151,7 @@ const NATIVE_CREDENTIAL_DENYLIST = {
     'access_token',
     'idToken',
     'codexAuth',
+    'grokAuth',
   ],
   substrings: [
     'GOOGLE_APPLICATION_CREDENTIALS',
@@ -144,6 +159,8 @@ const NATIVE_CREDENTIAL_DENYLIST = {
     'client_email',
     'BEGIN PRIVATE KEY',
     'service_account',
+    'XAI_API_KEY',
+    'GROK_API_KEY',
   ],
 };
 

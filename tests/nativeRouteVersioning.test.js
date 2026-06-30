@@ -38,7 +38,8 @@ test('native media worker can enable live providers from env gates', () => {
   const source = serverSource();
   assert.match(source, /process\.env\.NATIVE_MEDIA_LIVE_VERTEX\s*===\s*['"]1['"]/);
   assert.match(source, /process\.env\.NATIVE_MEDIA_LIVE_CODEX\s*===\s*['"]1['"]/);
-  assert.match(source, /provider:\s*\{\s*fake:\s*!\(liveVertex\s*\|\|\s*liveCodex\)\s*\}/);
+  assert.match(source, /process\.env\.NATIVE_MEDIA_LIVE_GROK\s*===\s*['"]1['"]/);
+  assert.match(source, /provider:\s*\{\s*fake:\s*!\(liveVertex\s*\|\|\s*liveCodex\s*\|\|\s*liveGrok\)\s*\}/);
   assert.match(source, /gateway\.submitGeneration\([^,]+,\s*generationOptions\(\)\)/s);
   assert.match(source, /gateway\.reconcileOnRestart\(\)/);
 });

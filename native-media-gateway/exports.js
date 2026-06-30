@@ -8,6 +8,7 @@ const scheduler = require('./scheduler.js');
 const vertexImageProvider = require('./vertexImageProvider.js');
 const vertexVideoProvider = require('./vertexVideoProvider.js');
 const codexImageProvider = require('./codexImageProvider.js');
+const grokVideoProvider = require('./grokVideoProvider.js');
 
 function storeRoot() {
   return process.env.NATIVE_MEDIA_ROOT
@@ -29,6 +30,7 @@ const MODELS = [
   { id: 'native.vertex.veo-3.1', label: 'Veo 3.1 (Server · Vertex AI)', provider: 'vertex', tasks: ['text-to-video', 'image-to-video'] },
   { id: 'native.vertex.veo-3.1-fast', label: 'Veo 3.1 Fast (Server · Vertex AI)', provider: 'vertex', tasks: ['text-to-video', 'image-to-video'] },
   { id: 'native.codex.gpt-image-2', label: 'GPT Image 2 (Server · Codex)', provider: 'codex', tasks: ['text-to-image', 'image-to-image'] },
+  { id: 'native.grok.imagine-video', label: 'Grok Imagine Video (Server · Grok CLI)', provider: 'grok', tasks: ['image-to-video'] },
 ];
 
 const CAPABILITY_CONSTRAINTS = {
@@ -43,6 +45,10 @@ const CAPABILITY_CONSTRAINTS = {
   veoI2vInputMaxBytes: 20 * 1024 * 1024,
   veoMaxReferenceImages: 3,
   veoReferenceDurationSeconds: 8,
+  grokDurationsSeconds: [6, 10],
+  grokResolutions: ['480p', '720p'],
+  grokMaxReferenceImages: 6,
+  grokI2vInputMaxBytes: 20 * 1024 * 1024,
   codexConcurrency: 1,
   // V1 single-host scheduler caps per provider.
   providerConcurrency: scheduler.PROVIDER_CONCURRENCY,
@@ -52,12 +58,21 @@ const CREDENTIAL_FIELDS = new Set([
   'apiKey',
   'api_key',
   'x-api-key',
+  'xai_api_key',
+  'xaiApiKey',
+  'XAI_API_KEY',
+  'grok_api_key',
+  'grokApiKey',
+  'GROK_API_KEY',
   'googleApplicationCredentials',
   'serviceAccountJson',
   'accessToken',
   'access_token',
+  'token',
+  'auth',
   'idToken',
   'codexAuth',
+  'grokAuth',
   'authorization',
   'cookie',
 ]);
@@ -162,10 +177,15 @@ function sniffMime(bytes, fallback = '') {
 function validateCredentialFree(value, trail = []) {
   if (!value || typeof value !== 'object') return;
   for (const [key, nested] of Object.entries(value)) {
-    if (CREDENTIAL_FIELDS.has(key)) {
+    const normalizedKey = String(key).replace(/[-_\s]/g, '').toLowerCase();
+    if (
+      CREDENTIAL_FIELDS.has(key) ||
+      CREDENTIAL_FIELDS.has(String(key).toLowerCase()) ||
+      /^(apikey|xapikey|xaiapikey|grokapikey|googleapplicationcredentials|serviceaccountjson|accesstoken|idtoken|codexauth|grokauth|authorization|cookie|token|auth|secret|credential|privatekey)$/.test(normalizedKey)
+    ) {
       throw new Error(`client-supplied provider credential field is forbidden: ${[...trail, key].join('.')}`);
     }
-    if (typeof nested === 'string' && /private_key|BEGIN PRIVATE KEY|GOOGLE_APPLICATION_CREDENTIALS|service_account/i.test(nested)) {
+    if (typeof nested === 'string' && /private_key|BEGIN PRIVATE KEY|GOOGLE_APPLICATION_CREDENTIALS|service_account|XAI_API_KEY|GROK_API_KEY/i.test(nested)) {
       throw new Error(`client-supplied provider credential value is forbidden: ${[...trail, key].join('.')}`);
     }
     validateCredentialFree(nested, [...trail, key]);
@@ -328,6 +348,7 @@ async function drainQueued(provider) {
         provider: job.providerConfig || { fake: true },
         liveVertex: job.liveVertex === true || launchOptions.liveVertex === true,
         liveCodex: job.liveCodex === true || launchOptions.liveCodex === true,
+        liveGrok: job.liveGrok === true || launchOptions.liveGrok === true,
       });
     } catch (err) {
       await persistJobPatch(job.id, { status: 'failed', error: 'DRAIN_LAUNCH_FAILED', detail: String(err && err.message) });
@@ -565,6 +586,41 @@ async function launchProviderWork(job, clean, options) {
     return runningJob;
   }
 
+  if (
+    options.liveGrok === true &&
+    grokVideoProvider.liveGrokEnabled() &&
+    grokVideoProvider.isGrokVideoModel(clean.modelId)
+  ) {
+    let live;
+    try {
+      live = await grokVideoProvider.runGrokVideoProvider(runningJob, clean, {
+        scheduler,
+        register: registerProviderSubprocess,
+        getAsset,
+        tmpDir: TMP_DIR,
+      }, { spawn: options.spawn, timeoutMs: options.timeoutMs });
+    } catch (err) {
+      await failBeforeRegistration(err);
+    }
+    if (registrationPersist) await registrationPersist;
+    runningJob = {
+      ...runningJob,
+      ...registrationPatch,
+      pid: live.child.pid,
+      pgid: registrationPatch ? registrationPatch.pgid : live.child.pid,
+      outputPath: live.outputPath,
+      expectedMime: live.expectedMime,
+    };
+    await persistJobPatch(job.id, {
+      pid: live.child.pid,
+      pgid: runningJob.pgid,
+      outputPath: live.outputPath,
+      expectedMime: live.expectedMime,
+      subprocessProvider: provider,
+    });
+    return runningJob;
+  }
+
   if (providerOpts.fake === false && typeof options.runProvider === 'function') {
     // Real provider adapter path (C5/C6/C7). The adapter spawns the provider
     // subprocess and registers it with the scheduler using the same hooks.
@@ -714,6 +770,7 @@ async function submitGenerationUnlocked(clean, options = {}) {
     providerConfig: options.provider || { fake: true },
     liveVertex: options.liveVertex === true,
     liveCodex: options.liveCodex === true,
+    liveGrok: options.liveGrok === true,
   };
 
   jobs[id] = job;
@@ -853,6 +910,7 @@ module.exports = {
   vertexImageProvider,
   vertexVideoProvider,
   codexImageProvider,
+  grokVideoProvider,
   assetUrl,
   cancelGeneration,
   cancelJob: cancelGeneration,

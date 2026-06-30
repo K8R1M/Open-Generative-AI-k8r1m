@@ -27,25 +27,31 @@ import { generateNativeMedia, uploadNativeFile } from "../nativeMedia.js";
 
 // ── tiny helpers ──────────────────────────────────────────────────────────────
 
+const NATIVE_GROK_IMAGINE_VIDEO_ID = "native.grok.imagine-video";
+
 function nativeVideoModelToDescriptor(m) {
-  const aspectRatios = m.aspectRatios || ["16:9"];
+  const aspectRatios = m.supportsAspectRatio === false ? [] : (m.aspectRatios || ["16:9"]);
   const durations = m.durationsSeconds || [8];
   const resolutions = m.resolutions || ["720p"];
-  return {
+  const inputs = {
+    prompt: { name: "prompt", type: "string" },
+    duration: { enum: durations, default: durations[0] || 8 },
+    resolution: { enum: resolutions, default: resolutions[0] || "720p" },
+  };
+  if (aspectRatios.length > 0) {
+    inputs.aspect_ratio = { enum: aspectRatios, default: aspectRatios[0] || "16:9" };
+  }
+  const descriptor = {
     id: m.id,
     name: m.label,
     endpoint: m.id,
     native: true,
     imageField: "images_list",
-    lastImageField: "last_image",
     maxImages: 1 + (m.maxReferenceImages || 0),
-    inputs: {
-      prompt: { name: "prompt", type: "string" },
-      aspect_ratio: { enum: aspectRatios, default: aspectRatios[0] || "16:9" },
-      duration: { enum: durations, default: durations[0] || 8 },
-      resolution: { enum: resolutions, default: resolutions[0] || "720p" },
-    },
+    inputs,
   };
+  if (m.supportsLastFrame !== false) descriptor.lastImageField = "last_image";
+  return descriptor;
 }
 
 const NATIVE_T2V_DESCRIPTORS = NATIVE_MODELS.filter(
@@ -61,7 +67,8 @@ const mergedI2VModels = [...i2vModels, ...NATIVE_I2V_DESCRIPTORS];
 
 function getAspectRatiosForT2VNative(modelId) {
   if (isNativeModelId(modelId)) {
-    return nativeModelById(modelId)?.aspectRatios || ["16:9"];
+    const m = nativeModelById(modelId);
+    return m?.supportsAspectRatio === false ? [] : (m?.aspectRatios || ["16:9"]);
   }
   return getAspectRatiosForVideoModel(modelId);
 }
@@ -82,7 +89,8 @@ function getResolutionsForT2VNative(modelId) {
 
 function getAspectRatiosForI2VNative(modelId) {
   if (isNativeModelId(modelId)) {
-    return nativeModelById(modelId)?.aspectRatios || ["16:9"];
+    const m = nativeModelById(modelId);
+    return m?.supportsAspectRatio === false ? [] : (m?.aspectRatios || ["16:9"]);
   }
   return getAspectRatiosForI2VModel(modelId);
 }
@@ -107,6 +115,22 @@ function getMaxImagesForI2VNative(modelId) {
     return 1 + (m?.maxReferenceImages || 0);
   }
   return getMaxImagesForI2VModel(modelId);
+}
+
+function nativeVideoReferencesEnabled(model) {
+  return model?.id === NATIVE_GROK_IMAGINE_VIDEO_ID || Number(model?.maxReferenceImages || 0) > 0;
+}
+
+function nativeVideoParams(model, selectedAr, selectedDuration, selectedResolution, selectedAudio) {
+  const parameters = {
+    aspectRatio: selectedAr,
+    durationSeconds: Number(selectedDuration),
+    resolution: selectedResolution,
+    audio: selectedAudio,
+  };
+  if (model?.supportsAspectRatio === false) delete parameters.aspectRatio;
+  if (model?.supportsAudioToggle === false) delete parameters.audio;
+  return parameters;
 }
 
 function nativeInputFromUrl(url, role) {
@@ -539,7 +563,7 @@ export default function VideoStudio({
       }
 
       setSelectedAudio(true);
-      setShowAudio(isNativeModelId(modelId));
+      setShowAudio(isNativeModelId(modelId) && nativeModelById(modelId)?.supportsAudioToggle !== false);
     },
     [],
   );
@@ -1073,13 +1097,16 @@ export default function VideoStudio({
 
     if (imageMode && isNativeModelId(selectedModel)) {
       const model = nativeModelById(selectedModel);
-      const refCount = model?.referenceImagesEnabled ? Math.max(0, uploadedImageUrls.length - 1) : 0;
-      const requiredDuration = model?.referenceDurationSeconds || 8;
-      if (uploadedEndImageUrl && Number(selectedDuration) !== requiredDuration) {
-        alert(`Veo last frame requires ${requiredDuration}s duration.`);
-        return;
+      const referenceImagesEnabled = model?.referenceImagesEnabled || nativeVideoReferencesEnabled(model);
+      const refCount = referenceImagesEnabled ? Math.max(0, uploadedImageUrls.length - 1) : 0;
+      const requiredDuration = model?.provider === "vertex" ? model?.referenceDurationSeconds || 8 : model?.referenceDurationSeconds;
+      if (uploadedEndImageUrl && model?.supportsLastFrame !== false && requiredDuration) {
+        if (uploadedEndImageUrl && Number(selectedDuration) !== requiredDuration) {
+          alert(`Veo last frame requires ${requiredDuration}s duration.`);
+          return;
+        }
       }
-      if (refCount > 0 && Number(selectedDuration) !== requiredDuration) {
+      if (refCount > 0 && requiredDuration && Number(selectedDuration) !== requiredDuration) {
         alert(`Veo reference images require ${requiredDuration}s duration.`);
         return;
       }
@@ -1132,22 +1159,20 @@ export default function VideoStudio({
         const maxImgs = getMaxImagesForI2VNative(selectedModel);
         if (isNativeModelId(selectedModel)) {
           const model = nativeModelById(selectedModel);
-          const imageUrls = model?.referenceImagesEnabled ? uploadedImageUrls : uploadedImageUrls.slice(0, 1);
+          const referenceImagesEnabled = model?.referenceImagesEnabled || nativeVideoReferencesEnabled(model);
+          const imageUrls = referenceImagesEnabled ? uploadedImageUrls : uploadedImageUrls.slice(0, 1);
           const inputs = imageUrls
             .map((u, idx) => nativeInputFromUrl(u, idx === 0 ? "first-frame" : "reference"))
             .filter(Boolean);
-          const endFrame = nativeInputFromUrl(uploadedEndImageUrl, "last-frame");
-          if (endFrame) inputs.push(endFrame);
+          if (model?.supportsLastFrame !== false) {
+            const endFrame = nativeInputFromUrl(uploadedEndImageUrl, "last-frame");
+            if (endFrame) inputs.push(endFrame);
+          }
           res = await generateNativeMedia({
             modelId: selectedModel,
             task: "image-to-video",
             prompt: trimmedPrompt,
-            parameters: {
-              aspectRatio: selectedAr,
-              durationSeconds: Number(selectedDuration),
-              resolution: selectedResolution,
-              audio: selectedAudio,
-            },
+            parameters: nativeVideoParams(model, selectedAr, selectedDuration, selectedResolution, selectedAudio),
             inputs,
           });
           if (!res?.url) throw new Error("No video URL returned by API");
@@ -1228,16 +1253,12 @@ export default function VideoStudio({
       } else {
         // T2V (including extend mode)
         if (isNativeModelId(selectedModel)) {
+          const model = nativeModelById(selectedModel);
           res = await generateNativeMedia({
             modelId: selectedModel,
             task: "text-to-video",
             prompt: trimmedPrompt,
-            parameters: {
-              aspectRatio: selectedAr,
-              durationSeconds: Number(selectedDuration),
-              resolution: selectedResolution,
-              audio: selectedAudio,
-            },
+            parameters: nativeVideoParams(model, selectedAr, selectedDuration, selectedResolution, selectedAudio),
           });
           if (!res?.url) throw new Error("No video URL returned by API");
 

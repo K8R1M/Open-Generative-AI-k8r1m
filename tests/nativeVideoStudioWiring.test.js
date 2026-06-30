@@ -7,12 +7,26 @@ const source = fs.readFileSync(
   path.join(process.cwd(), 'packages/studio/src/components/VideoStudio.jsx'),
   'utf8'
 );
+const nativeModelsSource = fs.readFileSync(
+  path.join(process.cwd(), 'packages/studio/src/nativeModels.js'),
+  'utf8'
+);
 
-test('VideoStudio appends native Veo models to T2V and I2V lists', () => {
+test('VideoStudio appends native video models to T2V and I2V lists', () => {
   assert.match(source, /NATIVE_T2V_DESCRIPTORS/);
   assert.match(source, /NATIVE_I2V_DESCRIPTORS/);
   assert.match(source, /mergedT2VModels = \[\.\.\.t2vModels, \.\.\.NATIVE_T2V_DESCRIPTORS\]/);
   assert.match(source, /mergedI2VModels = \[\.\.\.i2vModels, \.\.\.NATIVE_I2V_DESCRIPTORS\]/);
+});
+
+test('VideoStudio wires Grok as I2V-only and hides unsupported controls', () => {
+  assert.match(nativeModelsSource, /native\.grok\.imagine-video/);
+  assert.match(nativeModelsSource, /tasks:\s*\[\s*['"]image-to-video['"]\s*\]/);
+  assert.match(source, /supportsAspectRatio/);
+  assert.match(source, /supportsAudioToggle/);
+  assert.match(source, /supportsLastFrame/);
+  assert.match(source, /maxReferenceImages/);
+  assert.doesNotMatch(nativeModelsSource, /native\.grok\.imagine-video[\s\S]{0,240}text-to-video/);
 });
 
 test('VideoStudio native Veo requests use structured video parameters', () => {

@@ -14,6 +14,8 @@ const PRIVATE_JOB_FIELDS = new Set([
   'subprocessProvider',
   'providerConfig',
   'codexDiagnostics',
+  'grokDiagnostics',
+  'prompt',
 ]);
 
 function json(res, body, status = 200) {
@@ -50,6 +52,15 @@ function publicFailureMessage(job) {
   if (/Reauthentication is needed|gcloud auth application-default login|RefreshError/i.test(detail)) {
     return 'Vertex authentication failed before generation. The native worker needs valid Google Application Default Credentials or a configured service account.';
   }
+  if (/Grok timed out|TIMEOUT/i.test(detail)) {
+    return 'Grok video generation timed out before a verified MP4 was available. Try a shorter or simpler prompt.';
+  }
+  if (/usage guidelines|safety|policy|filtered/i.test(detail)) {
+    return 'Grok could not generate the video under provider safety rules. Try a different input image or prompt.';
+  }
+  if (/Grok CLI not found|grok_imagine_video|GROK_IMAGINE_CLI|auth|login|permission/i.test(detail)) {
+    return 'Grok video generation failed before completion. The native worker may need local Grok CLI setup.';
+  }
   return null;
 }
 
@@ -64,10 +75,12 @@ function publicJob(job) {
 function generationOptions() {
   const liveVertex = process.env.NATIVE_MEDIA_LIVE_VERTEX === '1';
   const liveCodex = process.env.NATIVE_MEDIA_LIVE_CODEX === '1';
+  const liveGrok = process.env.NATIVE_MEDIA_LIVE_GROK === '1';
   return {
-    provider: { fake: !(liveVertex || liveCodex) },
+    provider: { fake: !(liveVertex || liveCodex || liveGrok) },
     liveVertex,
     liveCodex,
+    liveGrok,
   };
 }
 

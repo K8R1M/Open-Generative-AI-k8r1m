@@ -5,7 +5,6 @@ import {
   isNativeModelId,
   isSameOriginAssetUrl,
   assetUrl,
-  NATIVE_VEO_REFERENCE_IMAGES_ENABLED,
 } from './nativeModels.js';
 
 const NATIVE_GENERATIONS_ENDPOINT = '/api/native-media/v1/generations';
@@ -90,6 +89,18 @@ function sanitizeParameters(parameters) {
   return out;
 }
 
+function applyNativeModelParameterSupport(model, parameters) {
+  if (!model || model.kind !== 'video') return parameters;
+  if (model.supportsAspectRatio === false) {
+    delete parameters.aspectRatio;
+    delete parameters.aspect_ratio;
+  }
+  if (model.supportsAudioToggle === false) {
+    delete parameters.audio;
+  }
+  return parameters;
+}
+
 function sanitizeInputs(inputs) {
   if (!Array.isArray(inputs)) return [];
   return inputs
@@ -113,31 +124,47 @@ function sanitizeInputs(inputs) {
     .filter(Boolean);
 }
 
-function validateVeoConstraints(modelId, parameters, inputs) {
+function validateNativeVideoConstraints(modelId, parameters, inputs) {
   const model = nativeModelById(modelId);
   if (!model || model.kind !== 'video') return;
   const dur = parameters?.durationSeconds ?? parameters?.duration;
   if (dur !== undefined && dur !== null) {
     const n = Number(dur);
-    if (!model.durationsSeconds.includes(n)) {
+    if (Array.isArray(model.durationsSeconds) && !model.durationsSeconds.includes(n)) {
       throw new Error(
-        `Unsupported Veo duration: ${dur}. Allowed durations: ${model.durationsSeconds.join(', ')} seconds.`
+        `Unsupported native video duration for ${model.label}: ${dur}. Allowed durations: ${model.durationsSeconds.join(', ')} seconds.`
       );
     }
   }
+  const resolution = parameters?.resolution;
+  if (resolution !== undefined && resolution !== null && Array.isArray(model.resolutions) && !model.resolutions.includes(resolution)) {
+    throw new Error(
+      `Unsupported native video resolution for ${model.label}: ${resolution}. Allowed resolutions: ${model.resolutions.join(', ')}.`
+    );
+  }
   if (Array.isArray(inputs)) {
     const refs = inputs.filter((i) => i && i.role === 'reference');
-    if (refs.length > 0 && !NATIVE_VEO_REFERENCE_IMAGES_ENABLED) {
-      throw new Error('Veo reference images are disabled for this native capability set.');
+    const lastFrames = inputs.filter((i) => i && i.role === 'last-frame');
+    const maxRefs = Number(model.maxReferenceImages || 0);
+    if (refs.length > 0 && maxRefs <= 0) {
+      throw new Error(`Reference images are disabled for ${model.label}.`);
     }
-    if (refs.length > model.maxReferenceImages) {
+    if (refs.length > maxRefs) {
       throw new Error(
-        `Veo reference images exceed maximum of ${model.maxReferenceImages} (got ${refs.length}).`
+        `Reference images exceed maximum of ${maxRefs} for ${model.label} (got ${refs.length}).`
       );
     }
-    if (refs.length > 0 && Number(dur) !== model.referenceDurationSeconds) {
+    if (lastFrames.length > 0 && model.supportsLastFrame === false) {
+      throw new Error(`Last-frame inputs are not supported for ${model.label}.`);
+    }
+    if (lastFrames.length > 0 && model.referenceDurationSeconds && Number(dur) !== model.referenceDurationSeconds) {
       throw new Error(
-        `Veo reference images require durationSeconds=${model.referenceDurationSeconds} (got ${dur}).`
+        `Last-frame inputs require durationSeconds=${model.referenceDurationSeconds} for ${model.label} (got ${dur}).`
+      );
+    }
+    if (refs.length > 0 && model.referenceDurationSeconds && Number(dur) !== model.referenceDurationSeconds) {
+      throw new Error(
+        `Reference images require durationSeconds=${model.referenceDurationSeconds} for ${model.label} (got ${dur}).`
       );
     }
   }
@@ -151,11 +178,15 @@ export function buildNativeRequest(opts = {}) {
   if (!modelId || !isNativeModelId(modelId)) {
     throw new Error(`Unknown native model id: ${modelId || '(missing)'}`);
   }
+  const model = nativeModelById(modelId);
   const task = opts.task;
+  if (task && Array.isArray(model?.tasks) && !model.tasks.includes(task)) {
+    throw new Error(`Unsupported native task for ${model.label}: ${task}. Allowed tasks: ${model.tasks.join(', ')}.`);
+  }
   const prompt = opts.prompt === undefined ? '' : String(opts.prompt);
-  const parameters = sanitizeParameters(opts.parameters);
+  const parameters = applyNativeModelParameterSupport(model, sanitizeParameters(opts.parameters));
   const inputs = sanitizeInputs(opts.inputs);
-  validateVeoConstraints(modelId, parameters, inputs);
+  validateNativeVideoConstraints(modelId, parameters, inputs);
   return {
     modelId,
     task,

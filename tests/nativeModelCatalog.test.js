@@ -25,14 +25,14 @@ test('native model ID set matches the frozen V1 contract', () => {
     [...NATIVE_MODEL_IDS].sort(),
     NATIVE_MODEL_DESCRIPTORS.map((d) => d.id).sort()
   );
-  assert.equal(NATIVE_MODEL_IDS.length, 5);
+  assert.equal(NATIVE_MODEL_IDS.length, 6);
 });
 
 test('native IDs use the native.* namespace and do not collide with existing IDs', () => {
   const existing = existingModelIds();
   assert.ok(existing.size > 0, 'existing model IDs must be discoverable for the collision check');
   for (const id of NATIVE_MODEL_IDS) {
-    assert.match(id, /^native\.(vertex|codex)\./, `native id ${id} must be namespaced`);
+    assert.match(id, /^native\.(vertex|codex|grok)\./, `native id ${id} must be namespaced`);
     assert.ok(!existing.has(id), `native id ${id} must not collide with an existing model id`);
   }
 });
@@ -58,6 +58,12 @@ test('capability constraints are internally consistent with the V1 plan', () => 
   assert.equal(c.nanoBananaMaxReferences, 10);
   assert.equal(c.nanoBananaInputMaxBytes, 7 * 1024 * 1024);
   assert.equal(c.codexConcurrency, 1);
+  assert.deepEqual([...c.grokDurationsSeconds].sort((a, b) => a - b), [6, 10]);
+  assert.deepEqual(c.grokResolutions.sort(), ['480p', '720p']);
+  assert.equal(c.grokMaxReferenceImages, 6);
+  assert.equal(c.grokSupportsAspectRatio, false);
+  assert.equal(c.grokSupportsAudioToggle, false);
+  assert.equal(c.grokSupportsLastFrame, false);
 });
 
 test('C2 native overlay is additive and preserves every existing ID (pending C2)', async () => {

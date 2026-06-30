@@ -135,6 +135,54 @@ test('unsupported Veo duration is rejected structurally (pending C2)', async () 
   );
 });
 
+test('native Grok I2V request keeps prompt structural and allows supported wrapper controls (pending C2)', async () => {
+  const impl = await loadNative('packages/studio/src/nativeMedia.js', 'C2 native facade');
+  const req = buildRequest(impl, {
+    modelId: 'native.grok.imagine-video',
+    task: 'image-to-video',
+    prompt: SAMPLE_PROMPT,
+    parameters: { durationSeconds: 10, resolution: '720p', aspectRatio: '16:9', audio: true },
+    inputs: [
+      { kind: 'asset', assetId: 'asset-start', role: 'first-frame' },
+      { kind: 'asset', assetId: 'asset-ref', role: 'reference' },
+    ],
+    clientRequestId: 'req-grok',
+  });
+  assert.equal(req.prompt, SAMPLE_PROMPT);
+  assert.equal(req.modelId, 'native.grok.imagine-video');
+  assert.equal(req.task, 'image-to-video');
+  assert.equal(req.parameters.durationSeconds, 10);
+  assert.equal(req.parameters.resolution, '720p');
+  assert.equal(req.parameters.aspectRatio, undefined, 'Grok wrapper does not accept aspect ratio');
+  assert.equal(req.parameters.audio, undefined, 'Grok wrapper does not accept audio toggle');
+  assert.deepEqual(req.inputs.map((i) => i.role), ['first-frame', 'reference']);
+});
+
+test('native Grok request rejects unsupported text-to-video and wrapper limits without Veo wording (pending C2)', async () => {
+  const impl = await loadNative('packages/studio/src/nativeMedia.js', 'C2 native facade');
+  assert.throws(
+    () =>
+      buildRequest(impl, {
+        modelId: 'native.grok.imagine-video',
+        task: 'text-to-video',
+        prompt: SAMPLE_PROMPT,
+        parameters: { durationSeconds: 6, resolution: '480p' },
+      }),
+    (err) => /image-to-video|unsupported/i.test(err.message) && !/Veo/i.test(err.message)
+  );
+  assert.throws(
+    () =>
+      buildRequest(impl, {
+        modelId: 'native.grok.imagine-video',
+        task: 'image-to-video',
+        prompt: SAMPLE_PROMPT,
+        parameters: { durationSeconds: 8, resolution: '1080p' },
+        inputs: [{ kind: 'asset', assetId: 'asset-start', role: 'first-frame' }],
+      }),
+    (err) => /duration|resolution/i.test(err.message) && !/Veo/i.test(err.message)
+  );
+});
+
 test('canonical envelope shape matches the frozen V1 contract', () => {
   const env = NATIVE_REQUEST_ENVELOPE;
   assert.equal(env.modelId, 'native.vertex.veo-3.1-fast');

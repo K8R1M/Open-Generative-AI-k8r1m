@@ -155,7 +155,9 @@ This fork can run selected native providers through the loopback native media
 gateway instead of the MuAPI proxy. The Studio app talks to
 `/api/native-media/v1/*`, which proxies to the local worker
 (`native-media-gateway/server.js`, usually on `127.0.0.1:19334`). Native models
-currently include Vertex Nano Banana, Vertex Veo, and Codex GPT Image.
+currently include Vertex Nano Banana, Vertex Veo, Codex GPT Image, and Grok
+Imagine video. Enable Grok live runs with `NATIVE_MEDIA_LIVE_GROK=1`; use port
+`19400` for the planned local app smoke.
 
 For durable systemd deployments, Vertex subprocesses use a narrow environment
 allowlist. `GOOGLE_APPLICATION_CREDENTIALS` is forwarded to the Python wrappers

@@ -8,6 +8,7 @@ export const NATIVE_MODEL_IDS = [
   'native.vertex.veo-3.1',
   'native.vertex.veo-3.1-fast',
   'native.codex.gpt-image-2',
+  'native.grok.imagine-video',
 ];
 
 export const NATIVE_MODELS = [
@@ -43,6 +44,9 @@ export const NATIVE_MODELS = [
     maxReferenceImages: NATIVE_VEO_REFERENCE_IMAGES_ENABLED ? 3 : 0,
     referenceImagesEnabled: NATIVE_VEO_REFERENCE_IMAGES_ENABLED,
     referenceDurationSeconds: 8,
+    supportsAspectRatio: true,
+    supportsAudioToggle: true,
+    supportsLastFrame: true,
   },
   {
     id: 'native.vertex.veo-3.1-fast',
@@ -56,6 +60,9 @@ export const NATIVE_MODELS = [
     maxReferenceImages: NATIVE_VEO_REFERENCE_IMAGES_ENABLED ? 3 : 0,
     referenceImagesEnabled: NATIVE_VEO_REFERENCE_IMAGES_ENABLED,
     referenceDurationSeconds: 8,
+    supportsAspectRatio: true,
+    supportsAudioToggle: true,
+    supportsLastFrame: true,
   },
   {
     id: 'native.codex.gpt-image-2',
@@ -64,6 +71,19 @@ export const NATIVE_MODELS = [
     kind: 'image',
     tasks: ['text-to-image', 'image-to-image'],
     maxReferences: 10,
+  },
+  {
+    id: 'native.grok.imagine-video',
+    label: 'Grok Imagine Video (Server · Grok CLI)',
+    provider: 'grok',
+    kind: 'video',
+    tasks: ['image-to-video'],
+    durationsSeconds: [6, 10],
+    resolutions: ['480p', '720p'],
+    maxReferenceImages: 6,
+    supportsAspectRatio: false,
+    supportsAudioToggle: false,
+    supportsLastFrame: false,
   },
 ];
 
@@ -79,6 +99,9 @@ export const NATIVE_CAPABILITY_CONSTRAINTS = {
   veoI2vInputMaxBytes: 20 * 1024 * 1024,
   veoMaxReferenceImages: NATIVE_VEO_REFERENCE_IMAGES_ENABLED ? 3 : 0,
   veoReferenceDurationSeconds: 8,
+  grokImagineVideoDurationsSeconds: [6, 10],
+  grokImagineVideoResolutions: ['480p', '720p'],
+  grokImagineVideoMaxReferenceImages: 6,
   codexConcurrency: 1,
 };
 
