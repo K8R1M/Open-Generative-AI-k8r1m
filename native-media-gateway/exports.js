@@ -30,7 +30,7 @@ const MODELS = [
   { id: 'native.vertex.veo-3.1', label: 'Veo 3.1 (Server · Vertex AI)', provider: 'vertex', tasks: ['text-to-video', 'image-to-video'] },
   { id: 'native.vertex.veo-3.1-fast', label: 'Veo 3.1 Fast (Server · Vertex AI)', provider: 'vertex', tasks: ['text-to-video', 'image-to-video'] },
   { id: 'native.codex.gpt-image-2', label: 'GPT Image 2 (Server · Codex)', provider: 'codex', tasks: ['text-to-image', 'image-to-image'] },
-  { id: 'native.grok.imagine-video', label: 'Grok Imagine Video (Server · Grok CLI)', provider: 'grok', tasks: ['image-to-video'] },
+  { id: 'native.grok.imagine-video', label: 'Grok Imagine 1.5 (server-native)', provider: 'grok', tasks: ['image-to-video'] },
 ];
 
 const CAPABILITY_CONSTRAINTS = {

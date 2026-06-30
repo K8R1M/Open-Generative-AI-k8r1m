@@ -73,7 +73,7 @@ const NATIVE_MODEL_DESCRIPTORS = [
   },
   {
     id: 'native.grok.imagine-video',
-    label: 'Grok Imagine Video (Server · Grok CLI)',
+    label: 'Grok Imagine 1.5 (server-native)',
     provider: 'grok',
     tasks: ['image-to-video'],
   },
