@@ -48,7 +48,7 @@ const CONSTRAINTS = {
   aspectRatios: new Set([
     '1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9',
   ]),
-  nanoBanana2ImageSizes: new Set(['512', '1K', '2K']),
+  nanoBanana2ImageSizes: new Set(['1K', '512']),
   nanoBananaProImageSizes: new Set(['1K', '2K']),
 };
 
@@ -173,6 +173,9 @@ function buildVertexImageArgs(opts) {
     argv.push('--aspect-ratio', String(parameters.aspectRatio));
   }
   if (parameters.imageSize != null) {
+    if (opts.modelId === 'native.vertex.nano-banana-2' && String(parameters.imageSize) === '2K') {
+      throw new Error('Nano Banana 2 imageSize 2K is not supported');
+    }
     argv.push('--image-size', String(parameters.imageSize));
   }
 

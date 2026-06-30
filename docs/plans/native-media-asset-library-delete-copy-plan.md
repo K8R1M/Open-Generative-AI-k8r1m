@@ -1,8 +1,8 @@
 # Native Media Library, Merge Preservation, Delete, And Copy Prompt Plan
 
-Last updated: 2026-06-30
+Last updated: 2026-07-01
 Branch: `feat/native-grok-imagine-video`
-Status: final plan after Grok 4.3, GLM 5.2 Opencode, and Gemini 3.5 Flash Multica audits
+Status: image-control amendment folded in after MER-192/MER-193/MER-194 Multica audits
 
 ## Merge Preservation Note
 
@@ -55,6 +55,7 @@ Legacy MuAPI generations are different: they are URL-only from the local browser
    - Delete asset with an "Are you sure?" confirmation.
 5. Delete native generated assets from both UI and server storage to clear disk space.
 6. Avoid deleting source uploads unless a later explicit cleanup feature handles unreferenced uploads.
+7. Fix Image Studio native image controls so server-native model defaults and menus match the real provider capabilities.
 
 ## Non-Goals For V1
 
@@ -204,6 +205,103 @@ Small card overlay actions:
   - if `!entry.native`, skip the server API and remove only from local state/localStorage after confirmation, clearly treating it as browser-local removal.
 - Trust the server `deletable` flag for server delete. Do not re-derive server delete policy in the browser. Legacy/localStorage-only entries are not server-deletable.
 
+## Image Studio Native Model Controls
+
+This is part of the same Image Studio follow-up because it touches the same native model descriptors, model picker behavior, and image history metadata.
+
+Current code facts to preserve while changing behavior:
+
+- Native image controls are projected from `packages/studio/src/nativeModels.js` through `nativeImageModelToT2IDescriptor()` and `nativeImageModelToI2IDescriptor()` in `packages/studio/src/components/ImageStudio.jsx`.
+- `ImageStudio` currently chooses defaults from the first item in `aspectRatios` and `imageSizes`.
+- Vertex Nano Banana image generation already forwards `parameters.aspectRatio` and `parameters.imageSize` to `native-media-gateway/bin/genai-image` as `--aspect-ratio` and `--image-size`.
+- Native Codex GPT Image 2 currently has no declared `aspectRatios` or `imageSizes`, so the UI falls back to `1:1`, and `native-media-gateway/codexImageProvider.js` currently ignores output size/aspect parameters.
+
+Required user-facing behavior:
+
+- Keep the existing MuAPI GPT Image 2 models unchanged.
+- Keep `native.codex.gpt-image-2` as an additional server-native provider.
+- For `native.vertex.nano-banana-2`:
+  - resolution menu: `1K`, `512`
+  - no `2K`
+  - default resolution: `1K`
+  - default aspect ratio: `16:9`
+- For `native.vertex.nano-banana-pro`:
+  - keep supported resolution menu: `1K`, `2K`
+  - default resolution: `1K`
+  - default aspect ratio: `16:9`
+- For both Nano Banana models, make the default via descriptor data, not a one-off Image Studio special case. The lazy implementation is to put `16:9` first in their native `aspectRatios` arrays and `1K` first in their `imageSizes` arrays unless an explicit `defaultAspectRatio` / `defaultImageSize` field is already needed by the final code.
+- Reordering descriptor arrays also reorders the visible menu. That is acceptable here because the requested default is more important than preserving the old native menu order.
+- Remove Nano Banana 2 `2K` from all mirrored capability sites, not only the UI descriptor:
+  - `packages/studio/src/nativeModels.js` model descriptor
+  - `packages/studio/src/nativeModels.js` `NATIVE_CAPABILITY_CONSTRAINTS.nanoBanana2ImageSizes`
+  - `native-media-gateway/exports.js` `CAPABILITY_CONSTRAINTS.nanoBanana2ImageSizes`
+  - `native-media-gateway/vertexImageProvider.js` `CONSTRAINTS.nanoBanana2ImageSizes`
+- For `native.codex.gpt-image-2`, expose aspect ratios:
+  - `auto`
+  - `1:1`
+  - `16:9`
+  - `9:16`
+  - `4:3`
+  - `3:4`
+- For `native.codex.gpt-image-2`, expose resolution modes:
+  - `1K`
+  - `2K`
+  - `4K`
+- For `native.codex.gpt-image-2`, default to:
+  - aspect ratio: `auto`
+  - resolution: `1K`
+
+Codex GPT Image 2 sizing rule:
+
+- OpenAI GPT Image 2 accepts `size` as either `auto` or an arbitrary `WIDTHxHEIGHT` string.
+- Both dimensions must be divisible by 16.
+- Aspect ratio must be between `1:3` and `3:1`.
+- Maximum supported resolution is `3840x2160`.
+- Resolutions above `2560x1440` are experimental, so the UI can offer `4K` because the user explicitly requested it, but tests/docs must mark it as an intentional high-resolution option.
+- Build one pure helper, shared by gateway tests and provider code, that maps `(aspectRatio, imageSize)` to the intended OpenAI `size` value. Do not scatter tables in React. Put it in the Codex provider boundary or a tiny adjacent module such as `native-media-gateway/codexImageSize.js`; do not create a generic sizing framework.
+- If aspect ratio is `auto`, send OpenAI `size: "auto"` and do not try to infer dimensions from the selected resolution. The selected resolution remains a UI value but does not override OpenAI auto sizing.
+- If aspect ratio is not `auto`, map the selected mode to divisible-by-16 dimensions. Initial target table, subject to official-doc verification during implementation and output-dimension smoke before merge:
+
+```text
+1K:
+  1:1  -> 1024x1024
+  16:9 -> 1536x864
+  9:16 -> 864x1536
+  4:3  -> 1536x1152
+  3:4  -> 1152x1536
+
+2K:
+  1:1  -> 2048x2048
+  16:9 -> 2560x1440
+  9:16 -> 1440x2560
+  4:3  -> 2048x1536
+  3:4  -> 1536x2048
+
+4K:
+  1:1  -> 2160x2160
+  16:9 -> 3840x2160
+  9:16 -> 2160x3840
+  4:3  -> 2880x2160
+  3:4  -> 2160x2880
+```
+
+Implementation notes:
+
+- Re-check the current official OpenAI GPT Image 2 image generation docs before coding this helper. The current docs say arbitrary `WIDTHxHEIGHT` is accepted when dimensions are divisible by 16, aspect ratio is between `1:3` and `3:1`, max supported resolution is `3840x2160`, and the request also satisfies current pixel and edge limits. The docs do not publish exact current pixel/edge limits, so do not treat inferred pixel limits as fact.
+- Resolve portrait max-edge semantics before implementation. This affects `2K 9:16`, `4K 9:16`, and `4K 3:4`, not only `4K 9:16`.
+- If the accepted semantics are conservative `width <= 3840` and `height <= 2160`, do not emit the raw portrait table above. Use exact-ratio, divisible-by-16 portrait fallbacks or disable the misleading high-resolution portrait option:
+  - `9:16` largest exact fallback under height `2160`: `1152x2048`
+  - `3:4` largest exact fallback under height `2160`: `1584x2112`
+  - Do not use `1216x2160` or `1624x2160` as exact-ratio fallbacks; they are not exact selected ratios, and `1624` is not divisible by 16.
+- Record the final accepted table in this plan before implementation starts if it differs from the initial target table.
+- In the client, continue sending native image params as `{ aspectRatio, imageSize }` so Image Studio remains provider-neutral.
+- In the Codex gateway provider, validate `aspectRatio` and `imageSize` against the native descriptor constraints and convert to the intended OpenAI `size`.
+- `codex exec --help` currently exposes no structural `--size` or image-size flag. Therefore the Codex native provider cannot honestly claim exact size control through argv alone.
+- The planned V1 delivery mechanism is a small Codex prompt builder that preserves the user's prompt as a distinct section and appends a deterministic provider instruction such as "Use GPT Image 2 and generate the image at size `<resolved-size>`." Tests must verify the final spawned prompt contains both the unchanged user prompt and the resolved size instruction.
+- Because prompt-level size control is weaker than an API parameter, merge remains blocked until a smoke test verifies the returned PNG dimensions for at least one non-auto size. If Codex CLI does not reliably honor the size instruction, do not ship exact `1K`/`2K`/`4K` claims for the native Codex provider; switch the plan to either hide resolution for native Codex or implement a verified server-side API route that can send OpenAI's `size` parameter structurally.
+- The provider must reject unsupported pairs before spawn with a clear error.
+- Generated history entries should keep the selected `aspect_ratio` and selected resolution label; server-side metadata may also store the resolved OpenAI size string if available.
+
 ## Migration / All Branches
 
 1. Treat `.native-media` as the durable native server store.
@@ -230,6 +328,24 @@ Small card overlay actions:
 - DELETE tombstones before filesystem removal, so failed `fs.rm` cannot leave a completed job pointing at a deleted asset.
 - Missing asset directory on DELETE is recoverable: tombstone the completed native job and return `204`.
 - Server is authoritative for `deletable`; the client only performs local removal for non-native localStorage entries.
+
+## 2026-07-01 Image-Control Audit Fold-In
+
+Karim requested this amendment be audited by these Multica agents before implementation:
+
+- `Gemini 3.5 Flash High - General`
+- `GLM 5.2 - Opencode`
+- `Grok 4.3 General`
+
+Audit instructions sent to agents must include Karim's exact requested behavior: Nano Banana 2 only `512` and `1K`, Nano Banana 2 and Pro default `1K` and `16:9`, native Codex GPT Image 2 has selectable `auto`, `1:1`, `16:9`, `9:16`, `4:3`, `3:4`, and native Codex GPT Image 2 has `1K`/`2K`/`4K` modes that map to valid GPT Image 2 `WIDTHxHEIGHT` sizes.
+
+Audit results:
+
+- `Grok 4.3 General`, issue `MER-194`, run `68ecc396-194d-44d8-9ee5-d65ba1e114a3`: `APPROVE_WITH_NOTES`. It claimed the amendment section was absent, but local `rg` verified `Image Studio Native Model Controls` already existed at line 208, so that finding was rejected as stale/unverified. Its useful reminders about descriptor defaults, Codex options, and tests were already covered or retained.
+- `Gemini 3.5 Flash High - General`, issue `MER-193`, run `b522e59b-cf2e-4684-96b4-cf94b235020b`: `APPROVE_WITH_NOTES`. Accepted the client model-switch reset test. Rejected its inferred exact pixel-limit claim as not proven by official docs.
+- `GLM 5.2 - Opencode`, issue `MER-192`, run `61b0b2c1-c86c-4e7f-9e1e-fa92ccbc2383`: `APPROVE_WITH_NOTES`. Accepted: Codex size delivery must be specified; portrait max-edge ambiguity affects 2K portrait too; Nano Banana 2 `2K` must be removed from all mirrored constraints; add Codex default-auto, auto-ignore-resolution, MuAPI regression, and spawn-size-delivery tests. Corrected GLM's suggested portrait fallback values to exact-ratio divisible-by-16 values before adding them.
+
+Do not implement these image-control changes until the final size table and Codex size delivery check are accepted by the implementation owner.
 
 ## Multica Audit Record
 
@@ -285,6 +401,22 @@ Client:
 - Legacy MuAPI/localStorage delete removes only the browser-local entry after confirmation and never calls native server delete.
 - Deleting a duplicate server+localStorage native entry does not leave a zombie localStorage card on refresh.
 - Server-down library fetch falls back to localStorage history.
+- Native Nano Banana 2 shows only `1K` and `512` resolution options and defaults to `1K`.
+- Native Nano Banana Pro defaults to `1K`.
+- Native Nano Banana 2 and Pro default to `16:9`.
+- Switching models, for example from a standard `1:1` model to Nano Banana 2 or native Codex GPT Image 2, immediately resets selected aspect ratio and resolution state to the first elements of the new model descriptor lists.
+- Native Codex GPT Image 2 shows aspect options `auto`, `1:1`, `16:9`, `9:16`, `4:3`, `3:4`.
+- Native Codex GPT Image 2 shows resolution modes `1K`, `2K`, `4K`, defaults aspect to `auto`, and defaults resolution to `1K`.
+- MuAPI `gpt-image-2` and `gpt-image-2-edit` remain non-native and still route through MuAPI, not native Codex helpers.
+
+Codex GPT Image 2 gateway:
+
+- Size helper maps supported non-auto `(aspectRatio, imageSize)` pairs to divisible-by-16 `WIDTHxHEIGHT` strings.
+- `auto` aspect ratio resolves to `size: "auto"` and ignores `imageSize`; the selected resolution label must not leak into the size instruction/request when aspect is `auto`.
+- Unsupported aspect ratio or image size is rejected before spawn.
+- Spawn construction test proves the resolved non-auto size is delivered to Codex by the chosen mechanism, currently prompt augmentation because `codex exec` has no `--size` flag.
+- Nano Banana 2 gateway validation rejects stale/non-UI `imageSize: "2K"` requests.
+- Tests cover at least square, landscape, portrait, `auto`, and an invalid pair.
 
 Manual:
 
@@ -297,3 +429,4 @@ Manual:
   - Asset directory is gone.
   - Job record is marked deleted.
   - Other assets still stream.
+- For native Codex GPT Image 2, generate at least one non-auto size and verify the returned PNG dimensions match the resolved size before claiming `1K`/`2K`/`4K` works through the Codex CLI provider.

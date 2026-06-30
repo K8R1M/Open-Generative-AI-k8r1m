@@ -12,3 +12,4 @@ Current active plan set:
 - `grok-imagine-video-provider-gemini-amended-plan-audit-brief.md` - shorter Multica Gemini audit brief for the amended plan.
 - `grok-imagine-video-provider-audit-status.md` - external audit issue/run IDs and expected report paths.
 - `native-media-asset-library-delete-copy-plan.md` - follow-up plan for preserving all native generated assets across branch merges, hydrating the UI from server-side `.native-media`, and adding copy/delete card actions.
+- `native-video-last-frame-download-plan.md` - follow-up plan for extracting the final frame of a native video generation with ffmpeg for reuse as the next first frame.

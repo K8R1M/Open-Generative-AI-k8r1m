@@ -8,6 +8,7 @@ import {
 } from './nativeModels.js';
 
 const NATIVE_GENERATIONS_ENDPOINT = '/api/native-media/v1/generations';
+const NATIVE_LIBRARY_ENDPOINT = '/api/native-media/v1/library';
 const NATIVE_UPLOADS_ENDPOINT = '/api/native-media/v1/uploads';
 const NATIVE_POLL_INTERVAL_MS = 2000;
 const NATIVE_POLL_TIMEOUT_MS = 440000;
@@ -315,6 +316,34 @@ export async function uploadNativeFile(file, _opts = {}) {
 }
 
 export const uploadToNative = uploadNativeFile;
+
+export async function listNativeLibrary({ kind = 'all', limit = 100 } = {}) {
+  if (!isBrowserFetchAvailable()) return [];
+  const params = new URLSearchParams();
+  params.set('kind', kind);
+  params.set('limit', String(limit));
+  const res = await fetch(`${NATIVE_LIBRARY_ENDPOINT}?${params.toString()}`, {
+    headers: { Accept: 'application/json' },
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '');
+    throw new Error(`Native library load failed: ${res.status} ${res.statusText} ${detail.slice(0, 120)}`);
+  }
+  const data = await res.json().catch(() => ({}));
+  return Array.isArray(data.items) ? data.items : [];
+}
+
+export async function deleteNativeLibraryItem(jobId) {
+  if (!jobId) throw new Error('deleteNativeLibraryItem requires a job id');
+  const res = await fetch(`${NATIVE_LIBRARY_ENDPOINT}/${encodeURIComponent(jobId)}`, {
+    method: 'DELETE',
+    headers: { Accept: 'application/json' },
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '');
+    throw new Error(`Native library delete failed: ${res.status} ${res.statusText} ${detail.slice(0, 120)}`);
+  }
+}
 
 async function fetchNativeJob(jobId) {
   const res = await fetch(`${NATIVE_GENERATIONS_ENDPOINT}/${encodeURIComponent(jobId)}`, {

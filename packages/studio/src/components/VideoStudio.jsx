@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
+import { Copy, Trash2 } from "lucide-react";
 import { generateVideo, generateI2V, processV2V, uploadFile } from "../muapi.js";
 import {
   t2vModels,
@@ -23,7 +24,7 @@ import {
   isNativeModelId,
   nativeModelById,
 } from "../nativeModels.js";
-import { generateNativeMedia, uploadNativeFile } from "../nativeMedia.js";
+import { deleteNativeLibraryItem, generateNativeMedia, listNativeLibrary, uploadNativeFile } from "../nativeMedia.js";
 
 // ── tiny helpers ──────────────────────────────────────────────────────────────
 
@@ -185,6 +186,65 @@ async function downloadFile(url, filename) {
   } catch {
     window.open(url, "_blank");
   }
+}
+
+async function copyPromptToClipboard(text) {
+  const value = text || "";
+  try {
+    await navigator.clipboard.writeText(value);
+    return;
+  } catch {}
+  const textarea = document.createElement("textarea");
+  textarea.value = value;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  document.body.appendChild(textarea);
+  textarea.select();
+  document.execCommand("copy");
+  document.body.removeChild(textarea);
+}
+
+function normalizeServerHistoryEntry(item) {
+  const url = item?.url || item?.outputs?.[0];
+  if (!url) return null;
+  const params = item.parameters || {};
+  return {
+    id: item.jobId || item.id,
+    jobId: item.jobId || item.id,
+    url,
+    prompt: item.prompt || "",
+    model: item.modelId || item.model,
+    aspect_ratio: item.aspectRatio || item.aspect_ratio || params.aspectRatio || params.aspect_ratio,
+    duration: item.duration || item.durationSeconds || params.duration || params.durationSeconds,
+    resolution: item.resolution || params.resolution,
+    timestamp: item.createdAt || item.completedAt || new Date().toISOString(),
+    native: true,
+    serverBacked: true,
+  };
+}
+
+function historyKeys(entry) {
+  return [entry?.jobId, entry?.request_id, entry?.id, entry?.url].filter(Boolean);
+}
+
+function sameHistoryEntry(a, b) {
+  return historyKeys(a).some((key) => historyKeys(b).includes(key));
+}
+
+function mergeServerHistory(local, server) {
+  const seen = new Set();
+  const out = [];
+  for (const entry of server.map(normalizeServerHistoryEntry).filter(Boolean)) {
+    historyKeys(entry).forEach((key) => seen.add(key));
+    out.push(entry);
+  }
+  for (const entry of local || []) {
+    if (historyKeys(entry).some((key) => seen.has(key))) continue;
+    historyKeys(entry).forEach((key) => seen.add(key));
+    out.push(entry);
+  }
+  return out.slice(0, 50);
 }
 
 // ── SVG icons (kept inline to avoid extra deps) ───────────────────────────────
@@ -594,6 +654,7 @@ export default function VideoStudio({
   // ── Persistence: Load ────────────────────────────────────────────────────
   useEffect(() => {
     try {
+      let restoredHistory = [];
       const stored = localStorage.getItem(PERSIST_KEY);
       if (stored) {
         const data = JSON.parse(stored);
@@ -616,7 +677,10 @@ export default function VideoStudio({
         if (data.uploadedVideoUrl) setUploadedVideoUrl(data.uploadedVideoUrl);
         if (data.uploadedVideoName) setUploadedVideoName(data.uploadedVideoName);
         if (data.prompt) setPrompt(data.prompt);
-        if (data.localHistory) setLocalHistory(data.localHistory);
+        if (data.localHistory) {
+          restoredHistory = data.localHistory;
+          setLocalHistory(restoredHistory);
+        }
 
         // Update control visibility based on restored model/mode
         applyControlsForModel(
@@ -626,6 +690,9 @@ export default function VideoStudio({
         );
         if (data.selectedAudio !== undefined) setSelectedAudio(!!data.selectedAudio);
       }
+      listNativeLibrary({ kind: "video", limit: 50 })
+        .then((items) => setLocalHistory((prev) => mergeServerHistory(prev.length ? prev : restoredHistory, items)))
+        .catch((err) => console.warn("Failed to hydrate VideoStudio library:", err));
     } catch (err) {
       console.warn("Failed to load VideoStudio persistence:", err);
     } finally {
@@ -1064,6 +1131,21 @@ export default function VideoStudio({
     setActiveHistoryIdx(0);
   }, []);
 
+  const deleteHistoryEntry = useCallback(async (entry) => {
+    if (!confirm("Delete this generation from the interface and server? This cannot be undone.")) return;
+    const jobId = entry?.jobId || entry?.request_id || (entry?.serverBacked ? entry?.id : null);
+    if (entry?.serverBacked && jobId) {
+      try {
+        await deleteNativeLibraryItem(jobId);
+      } catch (err) {
+        console.warn("Failed to delete VideoStudio library item:", err);
+        alert("Failed to delete generation from server.");
+        return;
+      }
+    }
+    setLocalHistory((prev) => prev.filter((item) => item !== entry && !sameHistoryEntry(item, entry)));
+  }, []);
+
   // ── show result in canvas ─────────────────────────────────────────────────
   const showVideoInCanvas = useCallback((url, model) => {
     setCanvasUrl(url);
@@ -1204,6 +1286,7 @@ export default function VideoStudio({
           setLastGenerationModel(null);
           const entry = {
             id: genId,
+            jobId: genId,
             url: res.url,
             prompt: trimmedPrompt,
             model: selectedModel,
@@ -1211,6 +1294,8 @@ export default function VideoStudio({
             duration: selectedDuration,
             resolution: selectedResolution,
             timestamp: new Date().toISOString(),
+            native: true,
+            serverBacked: true,
           };
           addToLocalHistory(entry);
           showVideoInCanvas(res.url, selectedModel);
@@ -1289,6 +1374,7 @@ export default function VideoStudio({
           setLastGenerationModel(null);
           const entry = {
             id: genId,
+            jobId: genId,
             url: res.url,
             prompt: trimmedPrompt,
             model: selectedModel,
@@ -1296,6 +1382,8 @@ export default function VideoStudio({
             duration: selectedDuration,
             resolution: selectedResolution,
             timestamp: new Date().toISOString(),
+            native: true,
+            serverBacked: true,
           };
           addToLocalHistory(entry);
           showVideoInCanvas(res.url, selectedModel);
@@ -1511,6 +1599,28 @@ export default function VideoStudio({
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                         <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3" />
                       </svg>
+                    </button>
+                    <button
+                      type="button"
+                      title="Copy prompt"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        copyPromptToClipboard(entry.prompt);
+                      }}
+                      className="p-2 bg-black/60 backdrop-blur-md rounded-full text-white hover:bg-primary hover:text-black transition-all border border-white/10"
+                    >
+                      <Copy size={14} strokeWidth={2.5} />
+                    </button>
+                    <button
+                      type="button"
+                      title="Delete"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        deleteHistoryEntry(entry);
+                      }}
+                      className="p-2 bg-black/60 backdrop-blur-md rounded-full text-white hover:bg-red-500 hover:text-white transition-all border border-white/10"
+                    >
+                      <Trash2 size={14} strokeWidth={2.5} />
                     </button>
                     {isSeedance2 && (
                       <button

@@ -27,6 +27,11 @@ function json(res, body, status = 200) {
   res.end(payload);
 }
 
+function noContent(res) {
+  res.writeHead(204);
+  res.end();
+}
+
 function safeError(error) {
   const message = String(error && error.message || '');
   if (/credential|unsupported|required|forbidden|invalid|missing|not found|mime|duration|reference|input|asset/i.test(message)) {
@@ -202,12 +207,21 @@ function streamAsset(res, asset, rangeHeader) {
 
 async function handleNativeRequest(req, res) {
   const url = new URL(req.url, `http://${HOST}`);
-  const [resource, id] = routeParts(url);
+  const parts = routeParts(url);
+  const [resource, id] = parts;
   try {
     if (req.method === 'GET') {
       if (!resource || resource === 'health') return json(res, { ok: true, service: 'native-media' });
       if (resource === 'ready') return json(res, { ok: true, ready: true });
       if (resource === 'capabilities') return json(res, gateway.getNativeCapabilities());
+      if (resource === 'library' && !id) {
+        const library = await gateway.listLibrary({
+          kind: url.searchParams.get('kind') || 'all',
+          limit: url.searchParams.get('limit') || 100,
+          cursor: url.searchParams.get('cursor') || 0,
+        });
+        return json(res, { ...library, items: library.items.map(publicJob) });
+      }
       if (resource === 'generations' && id) {
         const job = await gateway.getGeneration(id);
         return job ? json(res, publicJob(job)) : json(res, { error: 'generation not found' }, 404);
@@ -228,6 +242,10 @@ async function handleNativeRequest(req, res) {
       const job = await gateway.cancelGeneration(id);
       return job ? json(res, publicJob(job)) : json(res, { error: 'generation not found' }, 404);
     }
+    if (req.method === 'DELETE' && resource === 'library' && id && parts.length === 2) {
+      const job = await gateway.deleteLibraryJob(id);
+      return job ? noContent(res) : json(res, { error: 'library job not found' }, 404);
+    }
     return json(res, { error: 'native media route not found' }, 404);
   } catch (error) {
     const safe = safeError(error);
@@ -240,10 +258,12 @@ function createServer() {
 }
 
 async function start() {
-  await gateway.reconcileOnRestart();
+  const counts = await gateway.reconcileOnRestart();
+  const store = await gateway.getStoreInfo();
   const port = Number(process.env.NATIVE_MEDIA_GATEWAY_PORT || DEFAULT_PORT);
   const server = createServer();
   await new Promise((resolve) => server.listen(port, HOST, resolve));
+  console.log(`[native-media-gateway] root=${store.root} jobs=${store.jobs} assets=${store.assets} uploads=${store.uploads} reconcile=${JSON.stringify(counts)}`);
   console.log(`[native-media-gateway] listening on http://${HOST}:${port}`);
   return server;
 }

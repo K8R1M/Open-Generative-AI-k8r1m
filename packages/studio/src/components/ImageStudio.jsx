@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
+import { Copy, Trash2 } from "lucide-react";
 import { generateImage, generateI2I, uploadFile } from "../muapi.js";
 import {
   t2iModels,
@@ -21,7 +22,12 @@ import {
   isNativeModelId,
   nativeModelById,
 } from "../nativeModels.js";
-import { generateNativeMedia, uploadNativeFile } from "../nativeMedia.js";
+import {
+  deleteNativeLibraryItem,
+  generateNativeMedia,
+  listNativeLibrary,
+  uploadNativeFile,
+} from "../nativeMedia.js";
 
 // ─── Native model overlay (C3) ──────────────────────────────────────────────
 // Native image models share their Vertex/Codex facade IDs for both T2I and I2I.
@@ -177,6 +183,62 @@ async function downloadImage(url, filename) {
   } catch {
     window.open(url, "_blank");
   }
+}
+
+async function copyPromptToClipboard(text) {
+  const value = text || "";
+  try {
+    await navigator.clipboard.writeText(value);
+    return;
+  } catch {}
+  const textarea = document.createElement("textarea");
+  textarea.value = value;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  document.body.appendChild(textarea);
+  textarea.select();
+  document.execCommand("copy");
+  document.body.removeChild(textarea);
+}
+
+function normalizeServerHistoryEntry(item) {
+  const url = item?.url || item?.outputs?.[0];
+  if (!url) return null;
+  return {
+    id: item.jobId || item.id,
+    jobId: item.jobId || item.id,
+    url,
+    prompt: item.prompt || "",
+    model: item.model,
+    aspect_ratio: item.aspectRatio || item.aspect_ratio,
+    timestamp: item.createdAt || item.completedAt || new Date().toISOString(),
+    native: true,
+    serverBacked: true,
+  };
+}
+
+function historyKeys(entry) {
+  return [entry?.jobId, entry?.request_id, entry?.id, entry?.url].filter(Boolean);
+}
+
+function sameHistoryEntry(a, b) {
+  return historyKeys(a).some((key) => historyKeys(b).includes(key));
+}
+
+function mergeServerHistory(local, server) {
+  const seen = new Set();
+  const out = [];
+  for (const entry of server.map(normalizeServerHistoryEntry).filter(Boolean)) {
+    historyKeys(entry).forEach((key) => seen.add(key));
+    out.push(entry);
+  }
+  for (const entry of local || []) {
+    if (historyKeys(entry).some((key) => seen.has(key))) continue;
+    historyKeys(entry).forEach((key) => seen.add(key));
+    out.push(entry);
+  }
+  return out.slice(0, 50);
 }
 
 // ─── UploadButton (inline picker) ───────────────────────────────────────────
@@ -993,6 +1055,7 @@ export default function ImageStudio({
   // ── Persistence: Load ────────────────────────────────────────────────────
   useEffect(() => {
     try {
+      let restoredHistory = [];
       const stored = localStorage.getItem(PERSIST_KEY);
       if (stored) {
         const data = JSON.parse(stored);
@@ -1006,8 +1069,14 @@ export default function ImageStudio({
         if (data.prompt) setPrompt(data.prompt);
         if (data.uploadedImageUrls) setUploadedImageUrls(data.uploadedImageUrls);
         if (data.batchSize) setBatchSize(data.batchSize);
-        if (data.localHistory) setLocalHistory(data.localHistory);
+        if (data.localHistory) {
+          restoredHistory = data.localHistory;
+          setLocalHistory(restoredHistory);
+        }
       }
+      listNativeLibrary({ kind: "image", limit: 50 })
+        .then((items) => setLocalHistory((prev) => mergeServerHistory(prev.length ? prev : restoredHistory, items)))
+        .catch((err) => console.warn("Failed to hydrate ImageStudio library:", err));
     } catch (err) {
       console.warn("Failed to load ImageStudio persistence:", err);
     }
@@ -1258,6 +1327,21 @@ export default function ImageStudio({
     [historyItems],
   );
 
+  const deleteHistoryEntry = useCallback(async (entry) => {
+    if (!confirm("Delete this generation from the interface and server? This cannot be undone.")) return;
+    const jobId = entry?.jobId || entry?.request_id || (entry?.serverBacked ? entry?.id : null);
+    if (entry?.serverBacked && jobId) {
+      try {
+        await deleteNativeLibraryItem(jobId);
+      } catch (err) {
+        console.warn("Failed to delete ImageStudio library item:", err);
+        alert("Failed to delete generation from server.");
+        return;
+      }
+    }
+    setLocalHistory((prev) => prev.filter((item) => item !== entry && !sameHistoryEntry(item, entry)));
+  }, []);
+
   // ── View state ─────────────────────────────────────
 
   const resetToPrompt = () => {
@@ -1361,11 +1445,14 @@ export default function ImageStudio({
         if (res && res.url) {
           const entry = {
             id: res.id || Math.random().toString(36).substring(7),
+            jobId: res.native ? (res.request_id || res.id) : undefined,
             url: res.url,
             prompt: prompt.trim(),
             model: selectedModelId,
             aspect_ratio: selectedAr,
             timestamp: new Date().toISOString(),
+            native: !!res.native,
+            serverBacked: !!res.native,
           };
           addToHistory(entry);
           onGenerationComplete?.({
@@ -1442,6 +1529,28 @@ export default function ImageStudio({
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                       <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3" />
                     </svg>
+                  </button>
+                  <button
+                    type="button"
+                    title="Copy prompt"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      copyPromptToClipboard(entry.prompt);
+                    }}
+                    className="p-2 bg-black/60 backdrop-blur-md rounded-full text-white hover:bg-primary hover:text-black transition-all border border-white/10"
+                  >
+                    <Copy size={14} strokeWidth={2.5} />
+                  </button>
+                  <button
+                    type="button"
+                    title="Delete"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      deleteHistoryEntry(entry);
+                    }}
+                    className="p-2 bg-black/60 backdrop-blur-md rounded-full text-white hover:bg-red-500 hover:text-white transition-all border border-white/10"
+                  >
+                    <Trash2 size={14} strokeWidth={2.5} />
                   </button>
                 </div>
 

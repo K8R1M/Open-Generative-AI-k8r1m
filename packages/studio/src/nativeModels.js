@@ -18,8 +18,8 @@ export const NATIVE_MODELS = [
     provider: 'vertex',
     kind: 'image',
     tasks: ['text-to-image', 'image-to-image'],
-    aspectRatios: ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'],
-    imageSizes: ['512', '1K', '2K'],
+    aspectRatios: ['16:9', '1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '21:9'],
+    imageSizes: ['1K', '512'],
     maxReferences: 10,
   },
   {
@@ -28,7 +28,7 @@ export const NATIVE_MODELS = [
     provider: 'vertex',
     kind: 'image',
     tasks: ['text-to-image', 'image-to-image'],
-    aspectRatios: ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'],
+    aspectRatios: ['16:9', '1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '21:9'],
     imageSizes: ['1K', '2K'],
     maxReferences: 1,
   },
@@ -70,6 +70,10 @@ export const NATIVE_MODELS = [
     provider: 'codex',
     kind: 'image',
     tasks: ['text-to-image', 'image-to-image'],
+    aspectRatios: ['auto', '1:1', '16:9', '9:16', '4:3', '3:4'],
+    imageSizes: ['1K', '2K', '4K'],
+    defaultAspectRatio: 'auto',
+    defaultImageSize: '1K',
     maxReferences: 10,
   },
   {
@@ -88,9 +92,11 @@ export const NATIVE_MODELS = [
 ];
 
 export const NATIVE_CAPABILITY_CONSTRAINTS = {
-  nanoBananaAspectRatios: ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'],
-  nanoBanana2ImageSizes: ['512', '1K', '2K'],
+  nanoBananaAspectRatios: ['16:9', '1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '21:9'],
+  nanoBanana2ImageSizes: ['1K', '512'],
   nanoBananaProImageSizes: ['1K', '2K'],
+  codexGptImage2AspectRatios: ['auto', '1:1', '16:9', '9:16', '4:3', '3:4'],
+  codexGptImage2ImageSizes: ['1K', '2K', '4K'],
   nanoBananaMaxReferences: 10,
   nanoBananaInputMaxBytes: 7 * 1024 * 1024,
   veoAspectRatios: ['16:9', '9:16'],

@@ -35,7 +35,7 @@ const MODELS = [
 
 const CAPABILITY_CONSTRAINTS = {
   nanoBananaAspectRatios: ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'],
-  nanoBanana2ImageSizes: ['512', '1K', '2K'],
+  nanoBanana2ImageSizes: ['1K', '512'],
   nanoBananaProImageSizes: ['1K', '2K'],
   nanoBananaMaxReferences: 10,
   nanoBananaInputMaxBytes: 7 * 1024 * 1024,
@@ -85,6 +85,7 @@ const MP4_STUB = Buffer.from(MP4_HEX, 'hex');
 
 const idempotencyLocks = new Map();
 const queuedLaunchOptions = new Map();
+let jobsWriteQueue = Promise.resolve();
 const ALLOWED_INPUT_ROLES = new Set(['first-frame', 'last-frame', 'input', 'start-frame', 'end-frame', 'reference']);
 
 // --- Fake subprocess script (kept here so the gateway ships no extra file) ---
@@ -132,6 +133,18 @@ async function writeJsonAtomic(file, value) {
   await fsp.rename(tmp, file);
 }
 
+async function updateJobsAtomic(mutator) {
+  const nextWrite = jobsWriteQueue.catch(() => {}).then(async () => {
+    await ensureStore();
+    const jobs = readJsonSync(JOBS_FILE);
+    const result = await mutator(jobs);
+    await writeJsonAtomic(JOBS_FILE, jobs);
+    return result;
+  });
+  jobsWriteQueue = nextWrite.catch(() => {});
+  return nextWrite;
+}
+
 function emit(onEvent, event) {
   if (typeof onEvent === 'function') onEvent(event);
 }
@@ -155,6 +168,10 @@ function veoReferenceImagesEnabled() {
 
 function assetUrl(assetId) {
   return `${ASSET_URL_PREFIX}${assetId}`;
+}
+
+function isSafeAssetId(assetId) {
+  return !!assetId && typeof assetId === 'string' && !/[/\\]/.test(assetId) && !assetId.includes('..');
 }
 
 function extensionForMime(mime) {
@@ -199,6 +216,9 @@ function validateGenerationRequest(request) {
   if (!request.prompt || typeof request.prompt !== 'string') throw new Error('prompt is required');
   const model = MODELS.find((m) => m.id === request.modelId);
   if (!model.tasks.includes(request.task)) throw new Error(`unsupported native task for model: ${request.task}`);
+  if (model.id === 'native.vertex.nano-banana-2' && request.parameters && request.parameters.imageSize === '2K') {
+    throw new Error('Nano Banana 2 imageSize 2K is not supported');
+  }
   const inputs = Array.isArray(request.inputs) ? request.inputs : [];
   if (model.id === 'native.vertex.nano-banana-pro') {
     const referenceCount = inputs.reduce((count, input) => count + (input && input.role === 'reference' ? 1 : 0), 0);
@@ -308,12 +328,12 @@ function spawnFakeSubprocess(job, request, providerOpts) {
 
 // Persist a terminal patch onto a job and emit a terminal event.
 async function persistJobPatch(jobId, patch, onEvent) {
-  await ensureStore();
-  const jobs = readJsonSync(JOBS_FILE);
-  const prev = jobs[jobId] || {};
-  const next = { ...prev, ...patch, id: prev.id || jobId, request_id: prev.request_id || jobId, updatedAt: new Date().toISOString() };
-  jobs[jobId] = next;
-  await writeJsonAtomic(JOBS_FILE, jobs);
+  const next = await updateJobsAtomic((jobs) => {
+    const prev = jobs[jobId] || {};
+    const job = { ...prev, ...patch, id: prev.id || jobId, request_id: prev.request_id || jobId, updatedAt: new Date().toISOString() };
+    jobs[jobId] = job;
+    return job;
+  });
   if (onEvent) emit(onEvent, { type: 'job_terminal', jobId, status: next.status });
   return next;
 }
@@ -740,13 +760,9 @@ async function submitGeneration(request, options = {}) {
 
 async function submitGenerationUnlocked(clean, options = {}) {
   await ensureStore();
-  const jobs = readJsonSync(JOBS_FILE);
   const idempotency = readJsonSync(IDEMPOTENCY_FILE);
   const idempotencyKey = clean && clean.clientRequestId || null;
 
-  if (idempotencyKey && idempotency[idempotencyKey] && jobs[idempotency[idempotencyKey]]) {
-    return jobs[idempotency[idempotencyKey]];
-  }
   clean = validateGenerationRequest(clean);
   await validateInputAssets(clean);
 
@@ -773,9 +789,15 @@ async function submitGenerationUnlocked(clean, options = {}) {
     liveGrok: options.liveGrok === true,
   };
 
-  jobs[id] = job;
+  const created = await updateJobsAtomic((jobs) => {
+    if (idempotencyKey && idempotency[idempotencyKey] && jobs[idempotency[idempotencyKey]]) {
+      return { job: jobs[idempotency[idempotencyKey]], isNew: false };
+    }
+    jobs[id] = job;
+    return { job, isNew: true };
+  });
+  if (!created.isNew) return created.job;
   if (idempotencyKey) idempotency[idempotencyKey] = id;
-  await writeJsonAtomic(JOBS_FILE, jobs);
   await writeJsonAtomic(IDEMPOTENCY_FILE, idempotency);
   emit(options.onEvent, { type: 'job_created', jobId: id });
 
@@ -794,6 +816,68 @@ async function submitGenerationUnlocked(clean, options = {}) {
 async function getGeneration(id) {
   await ensureStore();
   return readJsonSync(JOBS_FILE)[id] || null;
+}
+
+async function readGeneratedAsset(assetId) {
+  if (!isSafeAssetId(assetId)) return null;
+  await ensureStore();
+  const dir = path.join(ASSETS_DIR, path.basename(assetId));
+  try {
+    const metaPath = path.join(dir, 'meta.json');
+    const meta = JSON.parse(await fsp.readFile(metaPath, 'utf8'));
+    const file = meta.path;
+    if (!file || path.basename(path.dirname(file)) !== assetId) return null;
+    const realAssets = await fsp.realpath(ASSETS_DIR);
+    const realFile = await fsp.realpath(file);
+    if (path.relative(realAssets, realFile).startsWith('..') || path.isAbsolute(path.relative(realAssets, realFile))) return null;
+    if (path.basename(path.dirname(realFile)) !== assetId) return null;
+    const stats = await fsp.stat(realFile);
+    if (!stats.isFile()) return null;
+    return { ...meta, path: realFile, size: stats.size };
+  } catch {
+    return null;
+  }
+}
+
+async function listLibrary({ kind = 'all', limit = 100, cursor = 0 } = {}) {
+  await ensureStore();
+  if (!['image', 'video', 'all'].includes(kind)) throw new Error('invalid library kind');
+  const start = Math.max(0, Number(cursor) || 0);
+  const cappedLimit = Math.max(1, Math.min(100, Number(limit) || 100));
+  const jobs = Object.values(readJsonSync(JOBS_FILE))
+    .filter((job) => job && job.status === 'completed' && !job.deletedAt && job.assetId)
+    .sort((a, b) => {
+      const byTime = String(b.completedAt || b.updatedAt || b.createdAt || '').localeCompare(String(a.completedAt || a.updatedAt || a.createdAt || ''));
+      return byTime || String(b.id || '').localeCompare(String(a.id || ''));
+    });
+
+  const items = [];
+  let index = start;
+  for (; index < jobs.length && items.length < cappedLimit; index++) {
+    const asset = await readGeneratedAsset(jobs[index].assetId);
+    if (!asset) continue;
+    if (kind !== 'all' && !String(asset.mime || '').startsWith(`${kind}/`)) continue;
+    items.push({ ...jobs[index], jobId: jobs[index].id, asset: { assetId: asset.assetId, id: asset.id, mime: asset.mime, url: asset.url, size: asset.size } });
+  }
+  return { items, nextCursor: index < jobs.length ? String(index) : null };
+}
+
+async function deleteLibraryJob(jobId) {
+  if (!jobId || typeof jobId !== 'string' || /[/\\]/.test(jobId) || jobId.includes('..')) throw new Error('invalid library job id');
+  let assetDir = null;
+  const tombstoned = await updateJobsAtomic(async (jobs) => {
+    const job = jobs[jobId];
+    if (!job || job.status !== 'completed' || job.deletedAt) return null;
+    if (!isSafeAssetId(job.assetId)) throw new Error('invalid native media asset id');
+    const asset = await readGeneratedAsset(job.assetId);
+    if (asset) assetDir = path.dirname(asset.path);
+    const now = new Date().toISOString();
+    jobs[jobId] = { ...job, status: 'asset_deleted', assetDeleted: true, deletedAt: now, assetDeletedAt: now, updatedAt: now };
+    return jobs[jobId];
+  });
+  if (!tombstoned) return null;
+  if (assetDir) await fsp.rm(assetDir, { recursive: true, force: true });
+  return tombstoned;
 }
 
 async function cancelGeneration(id) {
@@ -900,6 +984,24 @@ async function getAsset(assetId) {
   return null;
 }
 
+async function getStoreInfo() {
+  await ensureStore();
+  const jobs = readJsonSync(JOBS_FILE);
+  const countEntries = async (dir) => {
+    try {
+      return (await fsp.readdir(dir)).length;
+    } catch {
+      return 0;
+    }
+  };
+  return {
+    root: ROOT,
+    jobs: Object.keys(jobs).length,
+    assets: await countEntries(ASSETS_DIR),
+    uploads: await countEntries(UPLOADS_DIR),
+  };
+}
+
 const PROVIDER_CONCURRENCY = scheduler.PROVIDER_CONCURRENCY;
 
 module.exports = {
@@ -915,9 +1017,12 @@ module.exports = {
   cancelGeneration,
   cancelJob: cancelGeneration,
   createGeneration: submitGeneration,
+  deleteLibraryJob,
   getAsset,
   getGeneration,
   getNativeCapabilities,
+  getStoreInfo,
+  listLibrary,
   providerFor,
   reconcileJob,
   reconcileOnRestart,

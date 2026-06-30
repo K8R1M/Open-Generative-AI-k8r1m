@@ -196,6 +196,32 @@ test('buildVertexImageArgs: aspectRatio and imageSize map to wrapper flags', () 
   assert.equal(argv[argv.indexOf('--image-size') + 1], '2K');
 });
 
+test('buildVertexImageArgs: rejects stale Nano Banana 2 2K requests before spawn', () => {
+  assert.throws(
+    () =>
+      vertex.buildVertexImageArgs({
+        modelId: 'native.vertex.nano-banana-2',
+        task: 'text-to-image',
+        prompt: 'p',
+        parameters: { imageSize: '2K' },
+        outputPath: '/o.png',
+      }),
+    /Nano Banana 2|imageSize|2K/i
+  );
+});
+
+test('gateway.submitGeneration: rejects stale Nano Banana 2 2K requests before provider work', async () => {
+  await assert.rejects(
+    () => gateway.submitGeneration({
+      modelId: 'native.vertex.nano-banana-2',
+      task: 'text-to-image',
+      prompt: 'p',
+      parameters: { imageSize: '2K' },
+    }),
+    /Nano Banana 2|imageSize|2K/i
+  );
+});
+
 test('buildVertexImageArgs: rejects unsupported Vertex image model', () => {
   assert.throws(
     () => vertex.buildVertexImageArgs({ modelId: 'native.vertex.veo-3.1', task: 'text-to-image', prompt: 'p', outputPath: '/o.png' }),

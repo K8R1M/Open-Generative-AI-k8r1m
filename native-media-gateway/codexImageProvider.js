@@ -63,6 +63,30 @@ const CONSTRAINTS = {
   maxReferences: 10,
 };
 
+const SIZE_TARGETS = {
+  '1K': {
+    '1:1': '1024x1024',
+    '16:9': '1024x576',
+    '9:16': '576x1024',
+    '4:3': '1024x768',
+    '3:4': '768x1024',
+  },
+  '2K': {
+    '1:1': '2048x2048',
+    '16:9': '2048x1152',
+    '9:16': '1152x2048',
+    '4:3': '2048x1536',
+    '3:4': '1536x2048',
+  },
+  '4K': {
+    '1:1': '4096x4096',
+    '16:9': '4096x2304',
+    '9:16': '2304x4096',
+    '4:3': '4096x3072',
+    '3:4': '3072x4096',
+  },
+};
+
 const PRIMARY_ROLES = new Set(['input', 'image', 'first-frame', 'start-frame']);
 const REFERENCE_ROLES = new Set(['reference']);
 const ALLOWED_ROLES = new Set([...PRIMARY_ROLES, ...REFERENCE_ROLES]);
@@ -131,6 +155,23 @@ function classifyRole(role) {
   return null;
 }
 
+function resolveCodexImageSize(parameters = {}) {
+  const aspectRatio = parameters.aspectRatio || 'auto';
+  const imageSize = parameters.imageSize || null;
+  if (!imageSize || aspectRatio === 'auto') return null;
+  const byAspect = SIZE_TARGETS[imageSize];
+  if (!byAspect) throw new Error(`invalid Codex image size: ${imageSize}`);
+  const target = byAspect[aspectRatio];
+  if (!target) throw new Error(`invalid Codex image aspect ratio for size helper: ${aspectRatio}`);
+  return target;
+}
+
+function augmentPromptForSize(prompt, parameters = {}) {
+  const target = resolveCodexImageSize(parameters);
+  if (!target) return prompt;
+  return `${prompt}\n\nTarget output preference: ${parameters.imageSize} ${parameters.aspectRatio} (${target} target table). The CLI may vary; prioritize the requested framing.`;
+}
+
 // Build the `codex exec` argv from a clean, validated request. Pure function:
 // no spawn, no fs, no I/O — fully unit-testable.
 //
@@ -161,8 +202,7 @@ function buildCodexArgs(opts) {
   // `--image <FILE>...` is variadic; `--` keeps the prompt from being parsed
   // as another image path.
   argv.push('--');
-  // Prompt is the final positional argument, preserved verbatim.
-  argv.push(opts.prompt);
+  argv.push(augmentPromptForSize(opts.prompt, opts.parameters || {}));
   return argv;
 }
 
@@ -354,6 +394,7 @@ async function runCodexImageProvider(job, clean, ctx, opts = {}) {
     modelId: clean.modelId,
     task: clean.task,
     prompt: clean.prompt,
+    parameters: clean.parameters,
     inputPaths: resolved,
     lastMessagePath,
   });
@@ -527,10 +568,13 @@ module.exports = {
   ENV_ALLOWLIST,
   ENV_DENYLIST,
   DEFAULT_TIMEOUT_MS,
+  SIZE_TARGETS,
   isCodexImageModel,
   liveCodexEnabled,
   buildEnv,
   classifyRole,
+  resolveCodexImageSize,
+  augmentPromptForSize,
   buildCodexArgs,
   validateCodexImageInputs,
   resolveInputAssets,
