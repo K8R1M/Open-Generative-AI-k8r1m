@@ -1,0 +1,102 @@
+{
+  "schema_version": "codex-preserve-v1",
+  "agent": "codex",
+  "session_metadata": {
+    "thread_id": "019f1962-1a3e-7d61-a0b3-fff89af074b8",
+    "thread_name": "OpenGenerativeAI-grok-imagine-video-provider",
+    "client_code": "OpenGenerativeAI",
+    "timestamp_ist": "2026-06-30 23:37 IST",
+    "cwd": "/home/k8r1m/Open-Generative-AI",
+    "project_root": "/home/k8r1m/Open-Generative-AI",
+    "rollout_path": "/home/k8r1m/.codex/sessions/2026/06/30/rollout-2026-06-30T22-04-47-019f1962-1a3e-7d61-a0b3-fff89af074b8.jsonl"
+  },
+  "completed_tasks": [
+    "Implemented and committed native Grok Imagine video provider on branch feat/native-grok-imagine-video in commits 14d5c8b, 943affb, and 080603c.",
+    "Exposed the native provider as Grok Imagine 1.5 (server-native) while keeping the existing MuAPI Grok option in place.",
+    "Fixed image upload auth failure for native Grok by ensuring native Video Studio uploads use the native gateway path, not MuAPI upload credentials.",
+    "Verified server-native Grok single-image and reference-image smoke on app port 19400 through this branch gateway on port 19335.",
+    "Karim confirmed from the UI that Grok Imagine generation worked with one uploaded reference image.",
+    "Fixed cancel smoke by adding SIGTERM/SIGINT forwarding to /home/k8r1m/.codex/skills/grok-imagine-video/scripts/grok_imagine_video.py and confirmed no lingering Grok/wrapper process after cancel.",
+    "Ran targeted native tests, broad native test sweep, build, no-leak checks, Graphify refresh, and separate native code-reviewer reviews before earlier signoff.",
+    "Created and finalized docs/plans/native-media-asset-library-delete-copy-plan.md for preserving generated media across merges and adding copy/delete actions.",
+    "Audited the asset-library/delete/copy plan with Multica GLM 5.2 - Opencode issue MER-185 and incorporated accepted safety findings.",
+    "Closed failed/no-report Multica audit issues MER-183 and MER-184 and verified there were no in-progress Multica issues afterward."
+  ],
+  "current_state": [
+    "Branch is feat/native-grok-imagine-video.",
+    "Working tree has uncommitted documentation/state updates only: docs/plans/README.md, docs/plans/grok-imagine-video-provider-audit-status.md, docs/plans/grok-imagine-video-provider-context.md, docs/plans/grok-imagine-video-provider-plan.md, docs/plans/grok-imagine-video-provider-task-list.md, docs/plans/native-media-asset-library-delete-copy-plan.md, and this preserve handoff.",
+    "Branch gateway should remain running on port 19335 with NATIVE_MEDIA_LIVE_GROK=1.",
+    "Next app should remain running on port 19400 pointed at http://127.0.0.1:19335 for Karim's testing.",
+    "An older unrelated gateway/app on 19334/19300 existed earlier and should be left alone.",
+    "Karim is now testing multi-reference Grok Imagine video from the UI.",
+    "Merge back to main is still waiting on Karim's user testing on 19400.",
+    "The asset-library/delete/copy feature is planned only; no implementation code for it has been written yet."
+  ],
+  "modified_files": [
+    "docs/plans/README.md - added pointer to the asset-library/delete/copy follow-up plan.",
+    "docs/plans/grok-imagine-video-provider-audit-status.md - recorded GLM Opencode asset-plan audit and closed failed audit issues.",
+    "docs/plans/grok-imagine-video-provider-context.md - recorded Karim's successful one-reference UI test and follow-up asset plan.",
+    "docs/plans/grok-imagine-video-provider-plan.md - recorded Karim's successful one-reference UI test and follow-up asset plan.",
+    "docs/plans/grok-imagine-video-provider-task-list.md - marked one-reference user confirmation and multi-reference user smoke in progress.",
+    "docs/plans/native-media-asset-library-delete-copy-plan.md - finalized merge-preservation, server library, copy prompt, and safe delete plan after audit.",
+    "codex-handoffs/OpenGenerativeAI-grok-imagine-video-provider-2026-06-30-2337-019f1962-codex-preserve.json - fresh compact-safe handoff."
+  ],
+  "constraints_to_preserve": [
+    "User said: \"hey when done leave up on 19400 for me to test please\".",
+    "User said: \"i hope you are orceshtrating not coding or reviewing\".",
+    "User said: \"make clear different one to select in the model picker like Grok Imagine 1.5 (server-native) vcould be the name  - so i recognise it\".",
+    "User said: \"keep the MuAPI one there as it was - our native should be an additional provder right?? please do NOT BREAK anything while fixing this BE CAREFUL trace gcode update graph be WISE\".",
+    "User said: \"make sure to use graphify - update it to halp be efficient then also after code changes - and use the subagents as describe by plan you just orchestrate\".",
+    "User said: \"Anything that can SAFELY be done in parralell should be\".",
+    "User said: \"ok i am testing - in them meantime please make a note that when we merge back to main - do not want all the images and videos i mae, which currently appear in the interface, todissaperar\".",
+    "User wants all generations available in the interface across this branch, main, previous feature branch, and initial main branch where server assets exist.",
+    "User wants a future delete feature that deletes from both interface and server, with an are-you-sure popup.",
+    "User wants a subtle copy-prompt button on each asset thumbnail near existing maximize/download icons.",
+    "User corrected audit routing: use the working GLM 5.2 - Opencode agent via opencode-go plan, not the OpenRouter GLM provider.",
+    "User said: \"get rid of the other agent once glm has stated - the one that doesnt work - and make sure you keep the multica board updated= celean when run is done etc\"."
+  ],
+  "key_decisions_and_rationale": [
+    "Native Grok is an additional provider, not a replacement for MuAPI Grok, to preserve existing user workflows.",
+    "The user-facing native label is Grok Imagine 1.5 (server-native) so Karim can distinguish it from the MuAPI option.",
+    "Grok supports selectable 480p and 720p in this implementation because the local wrapper supports those resolutions.",
+    "Use the branch gateway on 19335 for 19400 testing because an older gateway occupied 19334 without the new Grok capability.",
+    "For the future asset-library plan, .native-media is the durable native media source of truth; browser localStorage remains fallback for legacy MuAPI entries.",
+    "Future delete is jobId-only. The server derives assetId from jobs.json and performs realpath containment checks before deleting .native-media/assets/<asset-id>.",
+    "Future delete should tombstone jobs in jobs.json with atomic temp-file plus rename writes, not remove provenance.",
+    "Future V1 does not delete .native-media/uploads because uploads may be source/reference inputs and need a separate unreferenced-upload cleanup policy.",
+    "Future library GET skips deleted/tombstoned/fake jobs by default and merges server/local UI history by url, then jobId, then id, with server fields winning.",
+    "Do not apply any Gemini audit recommendations for the asset-library plan because the Gemini run failed before producing a report."
+  ],
+  "issues_discovered": [
+    "Original upload attempt failed at 100 percent with MuAPI 403 because native Grok upload was using the wrong upload path. This was fixed in the branch commits.",
+    "Cancel smoke initially left a nested Grok process behind; fixed by forwarding signals from grok_imagine_video.py to the nested Grok process group.",
+    "The wrong GLM Multica agent path failed before audit because it used the non-working provider path; issue MER-183 was closed.",
+    "Gemini 3.5 Flash Multica issue MER-184 failed before audit with no useful report; it was closed.",
+    "Asset visibility across branches is not solved by the current implementation because Studio history is still browser localStorage-based and capped; the durable follow-up plan addresses it.",
+    "If the gateway starts from a different cwd without NATIVE_MEDIA_ROOT, it will use a different .native-media folder and the UI may look empty even though assets exist elsewhere."
+  ],
+  "open_questions": [
+    "Does Karim's current multi-reference Grok Imagine UI test pass on port 19400?",
+    "Before merging to main, are there generated assets in other worktrees or previous feature branches that need to be merged into this repo's .native-media store?",
+    "Should the asset-library/delete/copy plan be implemented immediately after Karim finishes testing, or kept as the next separate feature branch?"
+  ],
+  "next_steps": [
+    "Keep the branch app available on http://127.0.0.1:19400 for Karim's multi-reference test.",
+    "When Karim reports multi-reference results, update docs/plans/grok-imagine-video-provider-task-list.md and context with pass/fail details.",
+    "If multi-reference fails, diagnose with Graphify first, then narrow rg/sed reads, and use native executor subagents for any code changes.",
+    "Before merge to main, back up .native-media/jobs.json, .native-media/assets, and .native-media/uploads.",
+    "Before merge to main, decide and document a stable NATIVE_MEDIA_ROOT so generated media does not disappear from the interface after branch changes.",
+    "If asked to implement the asset-library/delete/copy feature, start from docs/plans/native-media-asset-library-delete-copy-plan.md and use tests for delete containment, tombstones, merge behavior, server-down fallback, and UI copy/delete states.",
+    "After any meaningful code changes, run Graphify refresh with graphify update . --force.",
+    "Do not merge until Karim finishes testing on 19400 and approves."
+  ],
+  "read_first": [
+    "/home/k8r1m/Open-Generative-AI/AGENTS.md",
+    "/home/k8r1m/Open-Generative-AI/docs/plans/README.md",
+    "/home/k8r1m/Open-Generative-AI/docs/plans/grok-imagine-video-provider-context.md",
+    "/home/k8r1m/Open-Generative-AI/docs/plans/grok-imagine-video-provider-plan.md",
+    "/home/k8r1m/Open-Generative-AI/docs/plans/grok-imagine-video-provider-task-list.md",
+    "/home/k8r1m/Open-Generative-AI/docs/plans/grok-imagine-video-provider-audit-status.md",
+    "/home/k8r1m/Open-Generative-AI/docs/plans/native-media-asset-library-delete-copy-plan.md"
+  ]
+}

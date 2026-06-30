@@ -158,6 +158,7 @@ Status legend:
   - Confirm returned URL is `/api/native-media/v1/assets/<asset-id>`.
   - Confirm final asset saved as `.native-media/assets/<asset-id>/data.mp4`.
   - Confirm logs remain private under `.native-media/tmp/<job-id>/`.
+  - User-facing confirmation on `19400`: Karim confirmed Grok Imagine generation worked with one uploaded reference image.
 
 - [x] Reference-images smoke:
   - Upload two or three compatible images.
@@ -166,6 +167,9 @@ Status legend:
   - Generate a simple one-beat prompt.
   - Confirm adapter uses reference mode.
   - Confirm video imports and plays.
+- [~] User multi-reference smoke:
+  - Karim is testing multi-reference video generation from the UI.
+  - Keep app available on `19400` for this test.
 
 - [x] Error smoke:
   - Try unsupported file type or too many refs.
@@ -203,4 +207,6 @@ Status legend:
 - [x] Studio/client/regression `code-reviewer` approves.
 - [x] Plan/context/task docs updated.
 - [x] Commit on feature branch with Lore-style commit message.
+- [x] Document follow-up asset-library/delete/copy plan:
+  - `docs/plans/native-media-asset-library-delete-copy-plan.md`
 - [ ] Merge back after user testing on `19400`.

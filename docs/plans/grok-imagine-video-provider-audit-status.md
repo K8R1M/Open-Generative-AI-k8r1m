@@ -41,3 +41,14 @@ Last updated: 2026-06-30
 - Prompt: `docs/plans/grok-imagine-video-provider-grok-4.3-audit-prompt.md`
 - Report: `docs/plans/grok-imagine-video-provider-grok-4.3-audit-report.md`
 - Status: read and verified by Codex. Useful findings were incorporated into the plan/task/context docs.
+
+## Native Media Asset Library Follow-up Audit
+
+- Plan: `docs/plans/native-media-asset-library-delete-copy-plan.md`
+- Purpose: preserve all native generated assets across branch switches/merge, hydrate Studio history from server-side `.native-media`, and plan copy-prompt plus safe server delete actions.
+- Agent used successfully: `GLM 5.2 - Opencode` via Multica, issue `MER-185`, run `d86f08e9-164f-48fb-a865-5f4bda39e4ae`.
+- Result: `REQUEST_CHANGES` focused on safety/spec precision. Codex accepted useful items and finalized the plan with jobId-only delete, server-derived asset paths, tombstones, atomic writes, `NATIVE_MEDIA_ROOT`, deterministic client merge precedence, and expanded tests.
+- Failed/no-report runs closed on the Multica board:
+  - wrong GLM provider path issue `MER-183`
+  - Gemini 3.5 Flash issue `MER-184`
+- Board cleanup check: no in-progress issues remained after closing the audit issues.

@@ -31,7 +31,9 @@ Add a native server-side video provider for Grok Imagine via the local terminal 
 - Live smoke used app port `19400` with this branch's gateway on `19335` because an older already-running gateway occupied `19334` and did not expose Grok capabilities.
 - Live single-image smoke completed job `job-99b8946d-a08d-410c-988a-b204e17f8cee`; returned `/api/native-media/v1/assets/asset-245fb901-3ee6-4e8d-8ddb-48653f320b55`, `video/mp4`, 194676 bytes.
 - Live reference-image smoke completed job `job-d8112fce-51e1-427b-b3d8-175e16d2bc31`; returned `/api/native-media/v1/assets/asset-88826ae6-5e17-4feb-9d9c-f2dbb20cb473`, `video/mp4`, 412730 bytes.
+- User-facing Video Studio test on `19400` succeeded with `Grok Imagine 1.5 (server-native)` using one uploaded reference image. Karim is next testing a multi-reference video flow.
 - Cancel smoke initially found an orphan nested Grok process; `/home/k8r1m/.codex/skills/grok-imagine-video/scripts/grok_imagine_video.py` now forwards SIGTERM/SIGINT to the nested Grok process group. Retest job `job-3ae614b0-cf9a-4975-8f20-660b8a253ef2` cancelled with zero lingering wrapper/Grok processes.
+- Follow-up asset persistence/delete/copy plan: `docs/plans/native-media-asset-library-delete-copy-plan.md`. It records that `.native-media` must be preserved across merge, native server jobs should hydrate the UI, and DELETE must be jobId-only with server-derived asset paths.
 - Graphify facts checked:
   - `generateNativeMedia()` is in `packages/studio/src/nativeMedia.js`.
   - `launchProviderWork()` is in `native-media-gateway/exports.js`.

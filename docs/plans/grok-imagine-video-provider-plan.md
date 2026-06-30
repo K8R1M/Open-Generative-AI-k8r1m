@@ -49,6 +49,10 @@ Add a new native server-side video provider using the local Grok Imagine CLI wra
 
 Implementation note from 2026-06-30: an older gateway was already listening on `19334` without Grok capabilities, so manual smoke used the required app port `19400` pointed at this branch's gateway on `19335`. Cancel smoke found and fixed the expected nested-process risk by adding SIGTERM/SIGINT forwarding to `/home/k8r1m/.codex/skills/grok-imagine-video/scripts/grok_imagine_video.py`.
 
+User test note from 2026-06-30: Karim confirmed Video Studio generation worked on `19400` with `Grok Imagine 1.5 (server-native)` and one uploaded reference image. Multi-reference testing is still in progress from the user side.
+
+Post-feature follow-up: preserve and surface all native server-side generated media across branch switches/merge, then add copy-prompt and safe delete actions. Durable plan: `docs/plans/native-media-asset-library-delete-copy-plan.md`.
+
 ## Implementation Orchestration
 
 - Branch: `feat/native-grok-imagine-video`
