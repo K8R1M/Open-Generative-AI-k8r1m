@@ -64,6 +64,10 @@ const NATIVE_I2V_DESCRIPTORS = NATIVE_MODELS.filter(
 
 const mergedT2VModels = [...t2vModels, ...NATIVE_T2V_DESCRIPTORS];
 const mergedI2VModels = [...i2vModels, ...NATIVE_I2V_DESCRIPTORS];
+const nativeGrokI2VDescriptor = NATIVE_I2V_DESCRIPTORS.find((m) => m.id === NATIVE_GROK_IMAGINE_VIDEO_ID);
+const t2vPickerModels = nativeGrokI2VDescriptor
+  ? [...mergedT2VModels, nativeGrokI2VDescriptor]
+  : mergedT2VModels;
 
 function getAspectRatiosForT2VNative(modelId) {
   if (isNativeModelId(modelId)) {
@@ -119,6 +123,25 @@ function getMaxImagesForI2VNative(modelId) {
 
 function nativeVideoReferencesEnabled(model) {
   return model?.id === NATIVE_GROK_IMAGINE_VIDEO_ID || Number(model?.maxReferenceImages || 0) > 0;
+}
+
+function isNativeI2VOnlyModel(model) {
+  return model?.kind === "video" && model.tasks?.includes("image-to-video") && !model.tasks?.includes("text-to-video");
+}
+
+function shouldUseNativeImageUpload(modelId) {
+  const model = nativeModelById(modelId);
+  return (
+    model?.id === NATIVE_GROK_IMAGINE_VIDEO_ID ||
+    (model?.kind === "video" && model.tasks?.includes("image-to-video"))
+  );
+}
+
+async function uploadVideoStudioImage(modelId, apiKey, file, onProgress) {
+  if (shouldUseNativeImageUpload(modelId)) {
+    return (await uploadNativeFile(file)).url;
+  }
+  return uploadFile(apiKey, file, onProgress);
 }
 
 function nativeVideoParams(model, selectedAr, selectedDuration, selectedResolution, selectedAudio) {
@@ -229,7 +252,7 @@ function DropdownItem({ label, selected, onClick }) {
 function ModelDropdown({ imageMode, selectedModel, onSelect, onClose }) {
   const [search, setSearch] = useState("");
 
-  const generationModels = imageMode ? mergedI2VModels : mergedT2VModels;
+  const generationModels = imageMode ? mergedI2VModels : t2vPickerModels;
 
   const lf = search.toLowerCase();
   const filteredMain = generationModels.filter(
@@ -682,11 +705,9 @@ export default function VideoStudio({
     setImageUploading(true);
     setImageProgress(0);
     try {
-      const url = isNativeModelId(selectedModel)
-        ? (await uploadNativeFile(file)).url
-        : await uploadFile(apiKey, file, (pct) => {
-            setImageProgress(pct);
-          });
+      const url = await uploadVideoStudioImage(selectedModel, apiKey, file, (pct) => {
+        setImageProgress(pct);
+      });
       setUploadedImageUrl(url);
       setUploadedVideoUrl(null);
       setUploadedVideoName(null);
@@ -817,11 +838,9 @@ export default function VideoStudio({
     setImageProgress(0);
 
     try {
-      const url = isNativeModelId(selectedModel)
-        ? (await uploadNativeFile(file)).url
-        : await uploadFile(apiKey, file, (pct) => {
-            setImageProgress(pct);
-          });
+      const url = await uploadVideoStudioImage(selectedModel, apiKey, file, (pct) => {
+        setImageProgress(pct);
+      });
       setUploadedImageUrl(url);
 
       // Motion-control v2v: image is a second input, not a mode switch
@@ -928,11 +947,9 @@ export default function VideoStudio({
     setEndImageUploading(true);
     setEndImageProgress(0);
     try {
-      const url = isNativeModelId(selectedModel)
-        ? (await uploadNativeFile(file)).url
-        : await uploadFile(apiKey, file, (pct) => {
-            setEndImageProgress(pct);
-          });
+      const url = await uploadVideoStudioImage(selectedModel, apiKey, file, (pct) => {
+        setEndImageProgress(pct);
+      });
       setUploadedEndImageUrl(url);
     } catch (err) {
       alert(`End frame upload failed: ${err.message}`);
@@ -1022,15 +1039,20 @@ export default function VideoStudio({
           setPromptDisabled(true);
         }
       } else {
+        const nativeModel = nativeModelById(m.id);
         if (v2vMode) {
           setV2vMode(false);
           setUploadedVideoUrl(null);
           setUploadedVideoName(null);
           setPromptDisabled(false);
         }
+        const forceImageMode = !imageMode && isNativeI2VOnlyModel(nativeModel);
+        if (forceImageMode) {
+          setImageMode(true);
+        }
         setSelectedModel(m.id);
-        setSelectedModelName(m.name);
-        applyControlsForModel(m.id, imageMode, false);
+        setSelectedModelName(nativeModel?.label || m.name);
+        applyControlsForModel(m.id, imageMode || forceImageMode, false);
       }
     },
     [v2vMode, imageMode, applyControlsForModel],
