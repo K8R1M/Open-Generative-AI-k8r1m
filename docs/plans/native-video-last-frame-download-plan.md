@@ -9,8 +9,9 @@ Add a small action on native video generation cards to extract the final frame o
 - Add a video-card action next to the existing fullscreen/download/copy/delete controls.
 - Only enable it for completed video assets with a native server job/asset URL.
 - Use server-side `ffmpeg`/`ffprobe`; do not decode full videos in the browser.
-- Return a same-origin downloaded image, likely PNG.
-- Keep generated frame extraction temporary in V1 unless a later import-to-library flow is requested.
+- Return a same-origin browser download, likely PNG.
+- V1 is download-only. Do not auto-import the frame into Uploads or prompt inputs until the later Uploads/sidebar phase.
+- Add a deterministic repo-local helper script that takes a video path and output path and extracts the true final frame at source quality.
 
 ## API Shape
 
@@ -18,20 +19,14 @@ Add a small action on native video generation cards to extract the final frame o
 POST /api/native-media/v1/library/:jobId/last-frame
 ```
 
-Response options:
-
-```json
-{ "url": "/api/native-media/v1/assets/<temp-or-frame-id>", "filename": "last-frame.png" }
-```
-
-or stream the PNG directly with `Content-Disposition: attachment`; choose the smaller implementation after checking existing asset streaming helpers.
+Response: stream the PNG directly with `Content-Disposition: attachment`.
 
 ## Server Plan
 
 1. Resolve the job by `jobId`; reject deleted/missing/non-video jobs.
 2. Derive the asset path from the job record, not from client input.
 3. Verify the resolved video file is under `.native-media/assets`.
-4. Use `ffprobe` if needed to determine duration, then `ffmpeg` to extract the final frame.
+4. Invoke the deterministic helper script with fixed argv and `shell:false`; the helper can use `ffprobe`/`ffmpeg` internally to extract the final frame.
 5. Bound runtime and output size; delete temp files after streaming if not imported.
 6. Redact local paths and subprocess stderr in public errors.
 

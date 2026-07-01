@@ -385,7 +385,8 @@ async function fetchNativeJob(jobId) {
 
 function terminalNativeError(result, status) {
   const reason = result.message || result.error || status || 'unknown';
-  return new Error(`Native generation ended with ${status}: ${reason}`);
+  const jobId = result.request_id ? ` job ${result.request_id}` : '';
+  return new Error(`Native generation${jobId} ended with ${status}: ${reason}`);
 }
 
 function assertCompletedNativeResult(result) {

@@ -147,12 +147,28 @@ This file records Karim's requested ideas for the next feature-development round
 - Add-to-prompt should append to existing prompt/inputs, separated by a space or new line, not replace existing inputs.
 - Generated videos should only be addable as prompt references for the new Gemini Omni provider in this next phase.
 - Filename version counters reset per prefix, but reverting to an old prefix should continue from the last used version for that prefix.
+- Filename prefixes should be separate per studio, not per provider. Image Studio shares one image naming prefix/counter across image providers; Video Studio shares one video naming prefix/counter across video providers.
 - Deleting uploads should warn when the upload is tagged in a Project or Reference. No warning is needed just because the upload was used to generate something.
 - Prompt templates should be plain Markdown files in V1.
 - Uploads tab should replace the generated images/videos in the center of the screen.
 - References sidebar should behave like a cascading menu: References -> Characters/Locations/Props -> named collection -> open that page.
+- Current Gemini Omni tests are still running and should not be inspected until Karim says they are finished. Test outputs will live under `/home/k8r1m/merlin/Projects/omni tests/` across multiple subfolders, not only `raizan-box-ref/`.
+- Gemini Omni learnings, reusable best practices, and scripts should be recorded so future runs can call the scripts directly, matching the existing Vertex/Nano Banana/Veo pattern after it is traced.
+- First feature branch/folder can be `feature-dev/omni-v1/`.
+- First branch scope is Gemini Omni V1 plus minimal UI/input changes it actually needs, then selected low-complexity adjacent buttons only.
+- First branch button priority after Omni: multi-select generated assets for batch deletion only, last-frame download for generated videos, then use generated images as references in Image Studio or Video Studio.
+- First branch should not include projects, references, characters, collection pages, bulk add-to-project/reference, uploaded-media warnings, sidebar/library redesign, prompt templates, or generated video references.
+- Batch delete is included in Omni V1.
+- Generated image actions should add the image as a reference/input to both Image Studio and Video Studio in this pass.
+- Last-frame V1 should run deterministic server extraction from a video card and auto-download the resulting frame to the laptop. Do not auto-import that frame into Uploads or prompt inputs until the later Uploads/sidebar phase.
+- Output naming V1 may leave server asset filenames unchanged, but must persist the user-assigned download/display name as metadata so future library, Reference, Project, and download views can show/use that assigned name.
+- Existing working Omni script surface: `/home/k8r1m/merlin/bin/genai-omni`, documented by `/home/k8r1m/.codex/skills/generate-media/sub-skills/generate-omni/SKILL.md`.
 
 ## Current Priority
 
-1. Add Gemini Omni native video provider first.
-2. Then continue with the other feature phases.
+1. Add Gemini Omni native video provider first and test it before adding adjacent buttons.
+2. Add multi-select checkboxes for generated image/video cards with batch delete only.
+3. Add last-frame download for generated videos using a deterministic server extraction helper and browser download.
+4. Add generated-image-to-reference actions for Image Studio and Video Studio.
+5. Add per-studio output naming prefixes/counters with durable download/display metadata, without renaming asset files unless later needed.
+6. Defer all project/reference/sidebar/template phases until this branch is working and merged.

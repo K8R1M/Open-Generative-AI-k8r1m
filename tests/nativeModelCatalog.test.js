@@ -25,7 +25,7 @@ test('native model ID set matches the frozen V1 contract', () => {
     [...NATIVE_MODEL_IDS].sort(),
     NATIVE_MODEL_DESCRIPTORS.map((d) => d.id).sort()
   );
-  assert.equal(NATIVE_MODEL_IDS.length, 6);
+  assert.equal(NATIVE_MODEL_IDS.length, 7);
 });
 
 test('native IDs use the native.* namespace and do not collide with existing IDs', () => {
@@ -58,6 +58,9 @@ test('capability constraints are internally consistent with the V1 plan', () => 
   assert.deepEqual(c.veoResolutions.sort(), ['1080p', '720p']);
   assert.equal(c.veoMaxReferenceImages, 3);
   assert.equal(c.veoReferenceDurationSeconds, 8);
+  assert.deepEqual(c.omniAspectRatios, ['16:9', '9:16']);
+  assert.deepEqual(c.omniDurationsSeconds, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+  assert.equal(c.omniMaxReferenceImages, 10);
   assert.equal(c.nanoBananaMaxReferences, 10);
   assert.equal(c.nanoBananaInputMaxBytes, 7 * 1024 * 1024);
   assert.deepEqual(c.nanoBanana2ImageSizes, ['1K', '512']);
@@ -72,6 +75,24 @@ test('capability constraints are internally consistent with the V1 plan', () => 
   assert.equal(c.grokSupportsAspectRatio, false);
   assert.equal(c.grokSupportsAudioToggle, false);
   assert.equal(c.grokSupportsLastFrame, false);
+});
+
+test('C2 native overlay exposes Omni as a selectable native video model', async () => {
+  const overlay = await loadNative(
+    'packages/studio/src/nativeModels.js',
+    'C2 native model overlay'
+  );
+  const omni = overlay.nativeModelById('native.vertex.gemini-omni-flash-preview');
+
+  assert.equal(omni.label, 'Gemini Omni Flash Preview (Server · Vertex AI)');
+  assert.equal(omni.provider, 'omni');
+  assert.equal(omni.kind, 'video');
+  assert.deepEqual(omni.tasks, ['text-to-video', 'image-to-video']);
+  assert.deepEqual(omni.aspectRatios, ['16:9', '9:16']);
+  assert.deepEqual(omni.durationsSeconds, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+  assert.equal(omni.maxReferenceImages, 10);
+  assert.equal(omni.supportsAudioToggle, false);
+  assert.equal(omni.supportsLastFrame, false);
 });
 
 test('C2 native overlay exposes image-control defaults for Nano Banana 2 and Codex GPT Image 2', async () => {

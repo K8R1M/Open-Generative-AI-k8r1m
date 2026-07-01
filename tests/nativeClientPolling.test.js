@@ -161,6 +161,36 @@ test('generateNativeMedia surfaces safe Vertex auth message over provider error 
   );
 });
 
+test('generateNativeMedia includes Omni failed job id and safe terminal message', async () => {
+  const impl = await loadNative('packages/studio/src/nativeMedia.js', 'safe terminal omni message');
+  let calls = 0;
+  const fetchImpl = async () => {
+    calls += 1;
+    if (calls === 1) return response({ id: 'job-omni-fail', status: 'running' });
+    return response({
+      id: 'job-omni-fail',
+      status: 'failed',
+      error: 'NONZERO_EXIT',
+      message: 'Omni provider failed before generation. Check Vertex credentials and retry.',
+    });
+  };
+
+  await assert.rejects(
+    () =>
+      withMockedBrowserFetch(fetchImpl, () =>
+        impl.generateNativeMedia({
+          modelId: 'native.vertex.gemini-omni-flash-preview',
+          task: 'text-to-video',
+          prompt: 'x',
+          clientRequestId: 'req-omni-fail',
+          pollIntervalMs: 0,
+          pollTimeoutMs: 50,
+        })
+      ),
+    /job-omni-fail.*Omni provider failed before generation/
+  );
+});
+
 test('generateNativeMedia times out bounded native polling', async () => {
   const impl = await loadNative('packages/studio/src/nativeMedia.js', 'I1 native client polling');
   let calls = 0;

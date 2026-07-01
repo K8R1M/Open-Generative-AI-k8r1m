@@ -29,6 +29,15 @@ import { copyPromptToClipboard, deleteNativeLibraryItem, generateNativeMedia, li
 // ── tiny helpers ──────────────────────────────────────────────────────────────
 
 const NATIVE_GROK_IMAGINE_VIDEO_ID = "native.grok.imagine-video";
+const OMNI_VIDEO_DISPLAY_RESOLUTION = "720p";
+
+function nativeVideoCardResolution(modelOrId, selectedResolution) {
+  const model = typeof modelOrId === "string" ? nativeModelById(modelOrId) : modelOrId;
+  if (model?.provider === "omni" && Array.isArray(model.resolutions) && model.resolutions.length === 0) {
+    return OMNI_VIDEO_DISPLAY_RESOLUTION;
+  }
+  return selectedResolution;
+}
 
 function nativeVideoModelToDescriptor(m) {
   const aspectRatios = m.supportsAspectRatio === false ? [] : (m.aspectRatios || ["16:9"]);
@@ -154,6 +163,7 @@ function nativeVideoParams(model, selectedAr, selectedDuration, selectedResoluti
   };
   if (model?.supportsAspectRatio === false) delete parameters.aspectRatio;
   if (model?.supportsAudioToggle === false) delete parameters.audio;
+  if (Array.isArray(model?.resolutions) && model.resolutions.length === 0) delete parameters.resolution;
   return parameters;
 }
 
@@ -200,7 +210,7 @@ function normalizeServerHistoryEntry(item) {
     model: item.modelId || item.model,
     aspect_ratio: item.aspectRatio || item.aspect_ratio || params.aspectRatio || params.aspect_ratio,
     duration: item.duration || item.durationSeconds || params.duration || params.durationSeconds,
-    resolution: item.resolution || params.resolution,
+    resolution: nativeVideoCardResolution(item.modelId || item.model, item.resolution || params.resolution),
     timestamp: item.createdAt || item.completedAt || new Date().toISOString(),
     native: true,
     serverBacked: true,
@@ -601,6 +611,7 @@ export default function VideoStudio({
         setSelectedResolution(resolutions[0]);
         setShowResolution(true);
       } else {
+        setSelectedResolution("");
         setShowResolution(false);
       }
 
@@ -1278,7 +1289,7 @@ export default function VideoStudio({
             model: selectedModel,
             aspect_ratio: selectedAr,
             duration: selectedDuration,
-            resolution: selectedResolution,
+            resolution: nativeVideoCardResolution(model, selectedResolution),
             timestamp: new Date().toISOString(),
             native: true,
             serverBacked: true,
@@ -1366,7 +1377,7 @@ export default function VideoStudio({
             model: selectedModel,
             aspect_ratio: selectedAr,
             duration: selectedDuration,
-            resolution: selectedResolution,
+            resolution: nativeVideoCardResolution(model, selectedResolution),
             timestamp: new Date().toISOString(),
             native: true,
             serverBacked: true,
@@ -1434,7 +1445,7 @@ export default function VideoStudio({
     } catch (e) {
       hadError = true;
       console.error("[VideoStudio]", e);
-      setGenerateError(e.message?.slice(0, 80) || "Generation failed");
+      setGenerateError(e.message || "Generation failed");
       setTimeout(() => setGenerateError(null), 4000);
     } finally {
       setGenerating(false);

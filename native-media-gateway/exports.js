@@ -9,6 +9,7 @@ const vertexImageProvider = require('./vertexImageProvider.js');
 const vertexVideoProvider = require('./vertexVideoProvider.js');
 const codexImageProvider = require('./codexImageProvider.js');
 const grokVideoProvider = require('./grokVideoProvider.js');
+const omniVideoProvider = require('./omniVideoProvider.js');
 
 function storeRoot() {
   return process.env.NATIVE_MEDIA_ROOT
@@ -29,6 +30,7 @@ const MODELS = [
   { id: 'native.vertex.nano-banana-pro', label: 'Nano Banana Pro (Server · Vertex AI)', provider: 'vertex', tasks: ['text-to-image', 'image-to-image'] },
   { id: 'native.vertex.veo-3.1', label: 'Veo 3.1 (Server · Vertex AI)', provider: 'vertex', tasks: ['text-to-video', 'image-to-video'] },
   { id: 'native.vertex.veo-3.1-fast', label: 'Veo 3.1 Fast (Server · Vertex AI)', provider: 'vertex', tasks: ['text-to-video', 'image-to-video'] },
+  { id: 'native.vertex.gemini-omni-flash-preview', label: 'Gemini Omni Flash Preview (Server · Vertex AI)', provider: 'omni', tasks: ['text-to-video', 'image-to-video'] },
   { id: 'native.codex.gpt-image-2', label: 'GPT Image 2 (Server · Codex)', provider: 'codex', tasks: ['text-to-image', 'image-to-image'] },
   { id: 'native.grok.imagine-video', label: 'Grok Imagine 1.5 (server-native)', provider: 'grok', tasks: ['image-to-video'] },
 ];
@@ -49,6 +51,11 @@ const CAPABILITY_CONSTRAINTS = {
   grokResolutions: ['480p', '720p'],
   grokMaxReferenceImages: 6,
   grokI2vInputMaxBytes: 20 * 1024 * 1024,
+  omniAspectRatios: ['16:9', '9:16'],
+  omniDurationsSeconds: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+  omniMaxImages: 10,
+  omniMaxVideos: 3,
+  omniInputMaxBytes: 250 * 1024 * 1024,
   codexConcurrency: 1,
   // V1 single-host scheduler caps per provider.
   providerConcurrency: scheduler.PROVIDER_CONCURRENCY,
@@ -369,6 +376,7 @@ async function drainQueued(provider) {
         liveVertex: job.liveVertex === true || launchOptions.liveVertex === true,
         liveCodex: job.liveCodex === true || launchOptions.liveCodex === true,
         liveGrok: job.liveGrok === true || launchOptions.liveGrok === true,
+        liveOmni: job.liveOmni === true || launchOptions.liveOmni === true,
       });
     } catch (err) {
       await persistJobPatch(job.id, { status: 'failed', error: 'DRAIN_LAUNCH_FAILED', detail: String(err && err.message) });
@@ -420,7 +428,12 @@ async function launchProviderWork(job, clean, options) {
 
   async function failBeforeRegistration(err) {
     if (!registrationPatch && !scheduler.isTracked(job.id)) {
-      await persistJobPatch(job.id, { status: 'failed', error: 'PROVIDER_LAUNCH_FAILED', detail: String(err && err.message) }, onEvent);
+      await persistJobPatch(job.id, {
+        status: 'failed',
+        error: err && err.nativeMediaError || 'PROVIDER_LAUNCH_FAILED',
+        message: err && err.publicMessage,
+        detail: String(err && (err.detail || err.message)),
+      }, onEvent);
       scheduler.releaseSlot(provider, job.id);
       await drainQueued(provider);
     }
@@ -641,6 +654,41 @@ async function launchProviderWork(job, clean, options) {
     return runningJob;
   }
 
+  if (
+    options.liveOmni === true &&
+    omniVideoProvider.liveOmniEnabled() &&
+    omniVideoProvider.isOmniVideoModel(clean.modelId)
+  ) {
+    let live;
+    try {
+      live = await omniVideoProvider.runOmniVideoProvider(runningJob, clean, {
+        scheduler,
+        register: registerProviderSubprocess,
+        getAsset,
+        tmpDir: TMP_DIR,
+      }, { spawn: options.spawn, timeoutMs: options.timeoutMs });
+    } catch (err) {
+      await failBeforeRegistration(err);
+    }
+    if (registrationPersist) await registrationPersist;
+    runningJob = {
+      ...runningJob,
+      ...registrationPatch,
+      pid: live.child.pid,
+      pgid: registrationPatch ? registrationPatch.pgid : live.child.pid,
+      outputPath: live.outputPath,
+      expectedMime: live.expectedMime,
+    };
+    await persistJobPatch(job.id, {
+      pid: live.child.pid,
+      pgid: runningJob.pgid,
+      outputPath: live.outputPath,
+      expectedMime: live.expectedMime,
+      subprocessProvider: provider,
+    });
+    return runningJob;
+  }
+
   if (providerOpts.fake === false && typeof options.runProvider === 'function') {
     // Real provider adapter path (C5/C6/C7). The adapter spawns the provider
     // subprocess and registers it with the scheduler using the same hooks.
@@ -661,7 +709,12 @@ async function launchProviderWork(job, clean, options) {
   }
   if (providerOpts.fake === false) {
     const detail = 'real provider requested but no real provider runner is available';
-    await persistJobPatch(job.id, { status: 'failed', error: 'REAL_PROVIDER_UNAVAILABLE', detail }, onEvent);
+    await persistJobPatch(job.id, {
+      status: 'failed',
+      error: 'REAL_PROVIDER_UNAVAILABLE',
+      message: 'Native provider unavailable.',
+      detail,
+    }, onEvent);
     scheduler.releaseSlot(provider, job.id);
     await drainQueued(provider);
     throw new Error(detail);
@@ -792,6 +845,7 @@ async function submitGenerationUnlocked(clean, options = {}) {
     liveVertex: options.liveVertex === true,
     liveCodex: options.liveCodex === true,
     liveGrok: options.liveGrok === true,
+    liveOmni: options.liveOmni === true,
   };
 
   const created = await updateJobsAtomic((jobs) => {
@@ -1018,6 +1072,7 @@ module.exports = {
   vertexVideoProvider,
   codexImageProvider,
   grokVideoProvider,
+  omniVideoProvider,
   assetUrl,
   cancelGeneration,
   cancelJob: cancelGeneration,

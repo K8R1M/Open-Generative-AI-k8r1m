@@ -1,0 +1,209 @@
+#!/usr/bin/env python3
+"""Generate videos with Gemini Omni Flash Preview on Vertex AI."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import mimetypes
+import os
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+from dotenv import load_dotenv
+
+ENV_PATH = Path(__file__).resolve().parents[1] / ".env"
+load_dotenv(ENV_PATH, override=True)
+
+
+def _env_file_sets_google_application_credentials() -> bool:
+    try:
+        return any(line.strip().startswith("GOOGLE_APPLICATION_CREDENTIALS=") for line in ENV_PATH.read_text().splitlines())
+    except OSError:
+        return False
+
+
+def _normalize_google_application_credentials() -> None:
+    creds = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "")
+    explicit_override = (
+        _env_file_sets_google_application_credentials()
+        or os.environ.get("NATIVE_MEDIA_ALLOW_GOOGLE_APPLICATION_CREDENTIALS") == "1"
+    )
+    if creds and not explicit_override:
+        os.environ.pop("GOOGLE_APPLICATION_CREDENTIALS", None)
+        return
+    if creds and not os.path.isabs(creds):
+        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str((ENV_PATH.parent / creds).resolve())
+
+
+_normalize_google_application_credentials()
+
+from google import genai
+from google.genai import types
+
+MODEL = "gemini-omni-flash-preview"
+VALID_ASPECT_RATIOS = {"16:9", "9:16"}
+MAX_IMAGES = 10
+MAX_VIDEOS = 3
+MAX_DURATION_SECONDS = 10
+INPUT_TOKEN_RATE_PER_MILLION = 1.50
+VIDEO_OUTPUT_RATE_PER_SECOND = 0.10
+TOKENS_PER_IMAGE = 2040
+TOKENS_PER_VIDEO_SECOND = 5792
+
+
+def _mime_type(path: Path, fallback: str) -> str:
+    return mimetypes.guess_type(str(path))[0] or fallback
+
+
+def _video_duration_seconds(path: Path) -> float | None:
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", str(path)],
+            check=True,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        return float(result.stdout.strip())
+    except Exception:
+        return None
+
+
+def _estimate_cost(duration: int, image_paths: list[Path], video_paths: list[Path]) -> dict[str, Any]:
+    input_image_cost = len(image_paths) * TOKENS_PER_IMAGE * INPUT_TOKEN_RATE_PER_MILLION / 1_000_000
+    input_video_cost = 0.0
+    video_inputs: list[dict[str, Any]] = []
+    for path in video_paths:
+        seconds = _video_duration_seconds(path)
+        cost = None
+        if seconds is not None:
+            cost = seconds * TOKENS_PER_VIDEO_SECOND * INPUT_TOKEN_RATE_PER_MILLION / 1_000_000
+            input_video_cost += cost
+        video_inputs.append({"path": str(path), "duration_seconds": seconds, "estimated_cost_usd": cost})
+    output_cost = duration * VIDEO_OUTPUT_RATE_PER_SECOND
+    return {
+        "pricing_note": "Estimate only. Gemini Omni Flash: input $1.50/1M tokens, video output $0.10/sec.",
+        "estimated_input_images_usd": round(input_image_cost, 6),
+        "estimated_input_videos_usd": round(input_video_cost, 6),
+        "estimated_output_video_usd": round(output_cost, 6),
+        "estimated_total_usd_excluding_text": round(input_image_cost + input_video_cost + output_cost, 6),
+        "video_inputs": video_inputs,
+    }
+
+
+def _first_video_part(response: Any) -> tuple[bytes | None, str | None, str | None]:
+    for candidate in getattr(response, "candidates", None) or []:
+        content = getattr(candidate, "content", None)
+        for part in getattr(content, "parts", None) or []:
+            inline = getattr(part, "inline_data", None)
+            if inline and getattr(inline, "mime_type", "").startswith("video/"):
+                return inline.data, None, inline.mime_type
+            file_data = getattr(part, "file_data", None)
+            if file_data and getattr(file_data, "mime_type", "").startswith("video/"):
+                return None, file_data.file_uri, file_data.mime_type
+    return None, None, None
+
+
+def _write_json(path: Path, data: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2, sort_keys=True))
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Generate video with Gemini Omni Flash Preview via Vertex AI")
+    parser.add_argument("--prompt", "-p", required=True)
+    parser.add_argument("--output", "-o", required=True)
+    parser.add_argument("--input-image", action="append", default=[])
+    parser.add_argument("--input-video", action="append", default=[])
+    parser.add_argument("--input-audio", action="append", default=[])
+    parser.add_argument("--duration", "-d", type=int, default=6)
+    parser.add_argument("--aspect-ratio", "-a", default="16:9", choices=sorted(VALID_ASPECT_RATIOS))
+    parser.add_argument("--temperature", type=float, default=1.0)
+    parser.add_argument("--top-p", type=float, default=0.95)
+    parser.add_argument("--debug-json")
+    parser.add_argument("--metadata-json")
+    parser.add_argument("--project", default=os.environ.get("GOOGLE_CLOUD_PROJECT"))
+    parser.add_argument("--location", default=os.environ.get("GOOGLE_CLOUD_LOCATION", "global"))
+    args = parser.parse_args()
+
+    if args.input_audio:
+        sys.exit("Error: --input-audio is disabled.")
+    if not args.project:
+        sys.exit("Error: GOOGLE_CLOUD_PROJECT not set.")
+    if args.duration < 1 or args.duration > MAX_DURATION_SECONDS:
+        sys.exit(f"Error: --duration must be 1-{MAX_DURATION_SECONDS} seconds for Gemini Omni Preview.")
+    if len(args.input_image) > MAX_IMAGES:
+        sys.exit(f"Error: Gemini Omni supports up to {MAX_IMAGES} input images per prompt.")
+    if len(args.input_video) > MAX_VIDEOS:
+        sys.exit(f"Error: Gemini Omni supports up to {MAX_VIDEOS} input videos per prompt.")
+
+    image_paths = [Path(p).expanduser().resolve() for p in args.input_image]
+    video_paths = [Path(p).expanduser().resolve() for p in args.input_video]
+    for input_path in image_paths + video_paths:
+        if not input_path.exists():
+            sys.exit(f"Error: input not found: {input_path}")
+
+    output_path = Path(args.output).expanduser().resolve()
+    debug_path = Path(args.debug_json).expanduser().resolve() if args.debug_json else output_path.with_suffix(".debug.json")
+    metadata_path = Path(args.metadata_json).expanduser().resolve() if args.metadata_json else output_path.with_suffix(".metadata.json")
+    cost = _estimate_cost(args.duration, image_paths, video_paths)
+    metadata: dict[str, Any] = {
+        "created_at_utc": datetime.now(timezone.utc).isoformat(),
+        "model": MODEL,
+        "project": args.project,
+        "location": args.location,
+        "prompt": args.prompt,
+        "duration_seconds": args.duration,
+        "aspect_ratio": args.aspect_ratio,
+        "temperature": args.temperature,
+        "top_p": args.top_p,
+        "input_images": [str(p) for p in image_paths],
+        "input_videos": [str(p) for p in video_paths],
+        "output": str(output_path),
+        "debug_json": str(debug_path),
+        "cost_estimate": cost,
+        "status": "started",
+    }
+    _write_json(metadata_path, metadata)
+
+    print(f"Estimated cost: ${cost['estimated_total_usd_excluding_text']:.2f}", file=sys.stderr)
+    parts = [types.Part.from_text(text=args.prompt)]
+    for input_path in image_paths:
+        parts.append(types.Part.from_bytes(data=input_path.read_bytes(), mime_type=_mime_type(input_path, "image/png")))
+    for input_path in video_paths:
+        parts.append(types.Part.from_bytes(data=input_path.read_bytes(), mime_type=_mime_type(input_path, "video/mp4")))
+
+    client = genai.Client(vertexai=True, project=args.project, location=args.location)
+    try:
+        response = client.models.generate_content(
+            model=MODEL,
+            contents=[types.Content(role="user", parts=parts)],
+            config=types.GenerateContentConfig(response_modalities=["VIDEO", "TEXT"], temperature=args.temperature, top_p=args.top_p),
+        )
+        debug_path.parent.mkdir(parents=True, exist_ok=True)
+        debug_path.write_text(response.model_dump_json(indent=2, exclude_none=True))
+        video_bytes, file_uri, mime_type = _first_video_part(response)
+        if not video_bytes:
+            metadata.update({"status": "failed", "error": f"No inline video part returned; file_uri={file_uri!r}", "video_mime_type": mime_type})
+            _write_json(metadata_path, metadata)
+            print(f"Error: no downloadable inline video part found. DEBUG:{debug_path}", file=sys.stderr)
+            return 2
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_bytes(video_bytes)
+        metadata.update({"status": "success", "bytes_written": len(video_bytes), "video_mime_type": mime_type})
+        _write_json(metadata_path, metadata)
+        print(f"MEDIA:{output_path}")
+        print(f"METADATA:{metadata_path}")
+        return 0
+    except Exception as exc:
+        metadata.update({"status": "failed", "error": repr(exc)})
+        _write_json(metadata_path, metadata)
+        raise
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
