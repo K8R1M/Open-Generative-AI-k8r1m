@@ -1,0 +1,111 @@
+{
+  "schema_version": "codex-preserve-v1",
+  "agent": "codex",
+  "session_metadata": {
+    "thread_id": "019f1dea-1ec6-7ee1-880f-d0bb5e166c69",
+    "thread_name": "OGAI-omni-v1-preplan",
+    "client_code": "OGAI",
+    "timestamp_ist": "2026-07-01 21:26 IST",
+    "cwd": "/home/k8r1m/Open-Generative-AI",
+    "project_root": "/home/k8r1m/Open-Generative-AI",
+    "rollout_path": "/home/k8r1m/.codex/sessions/2026/07/01/rollout-2026-07-01T19-11-50-019f1dea-1ec6-7ee1-880f-d0bb5e166c69.jsonl"
+  },
+  "completed_tasks": [
+    "Read AGENTS.md, feature-dev/README.md, feature-dev/next-feature-inbox.md, and the prior preserve handoff /home/k8r1m/Open-Generative-AI/codex-handoffs/OGAI-next-feature-planning-2026-07-01-1909-019f1a2e-codex-preserve.json.",
+    "Confirmed main is at 1ab6018 on origin/main, with prior preserve commit pushed; no app code implementation started in this session.",
+    "Updated feature-dev/next-feature-inbox.md with Karim's clarified Omni V1 scope, excluded later phases, per-studio naming rule, last-frame V1 behavior, and working Omni script references.",
+    "Created feature-dev/omni-v1/README.md to define the first feature round scope and constraints.",
+    "Created and updated feature-dev/omni-v1/research-log.md with code-tracing results for the existing Vertex/Nano Banana/Veo path, Gemini Omni wrapper contract, batch delete, generated-image references, last-frame download, and naming metadata.",
+    "Refreshed Graphify with graphify update . --force; graphify-out/graph.json was updated.",
+    "Added /home/k8r1m/.codex/info-lookup-routing.md row for the OGAI Omni V1 feature round.",
+    "Read /home/k8r1m/.codex/skills/generate-media/sub-skills/generate-omni/SKILL.md and /home/k8r1m/merlin/bin/genai-omni without inspecting /home/k8r1m/merlin/Projects/omni tests/.",
+    "Updated docs/plans/native-video-last-frame-download-plan.md to lock V1 as deterministic server extraction plus browser download, not auto-import into Uploads or prompt inputs.",
+    "Spawned and integrated four read-only subagent traces: batch delete, last-frame download, generated-image-to-studio reference, and per-studio naming metadata.",
+    "Ran git diff --check after planning/research edits; it passed."
+  ],
+  "current_state": [
+    "Current branch is main. Working tree has planning/research changes only: docs/plans/native-video-last-frame-download-plan.md, feature-dev/next-feature-inbox.md, graphify-out/graph.json, feature-dev/omni-v1/, and this preserve handoff.",
+    "Global routing file /home/k8r1m/.codex/info-lookup-routing.md has an OGAI Omni V1 feature-round row.",
+    "Karim said Omni tests are nearly finished but not finished yet; do not inspect /home/k8r1m/merlin/Projects/omni tests/ until Karim explicitly says tests are finished.",
+    "No app code, provider adapter, endpoint, UI, or tests were implemented in this session.",
+    "Stable OGAI production/test app on systemd 19300 was not touched; feature branch/testing on 19400 has not started.",
+    "Untracked handoff sidecar files codex-handoffs/.turns-019f1962 and codex-handoffs/.turns-019f1a2e remain from earlier sessions and were intentionally left alone."
+  ],
+  "modified_files": [
+    "/home/k8r1m/Open-Generative-AI/feature-dev/next-feature-inbox.md - updated clarified Omni V1 scope, priorities, exclusions, naming metadata, last-frame V1, and script references.",
+    "/home/k8r1m/Open-Generative-AI/feature-dev/omni-v1/README.md - new feature-round scope and constraints document.",
+    "/home/k8r1m/Open-Generative-AI/feature-dev/omni-v1/research-log.md - new durable research notes and feasibility findings.",
+    "/home/k8r1m/Open-Generative-AI/docs/plans/native-video-last-frame-download-plan.md - revised to deterministic helper plus streamed browser download V1.",
+    "/home/k8r1m/Open-Generative-AI/graphify-out/graph.json - refreshed by graphify update . --force.",
+    "/home/k8r1m/.codex/info-lookup-routing.md - added OGAI Omni V1 feature-round row.",
+    "/home/k8r1m/Open-Generative-AI/codex-handoffs/OGAI-omni-v1-preplan-2026-07-01-2126-019f1dea-codex-preserve.json - this preserve handoff."
+  ],
+  "constraints_to_preserve": [
+    "Karim: \"Do not inspect `/home/k8r1m/merlin/Projects/omni tests/` until I say the Omni tests are finished.\"",
+    "Karim: \"Let's prioritize Omni first, then the selecting everything for deletion ... then the last frame download, and then adding image to the image or video studio as a reference.\"",
+    "Karim: \"we don't want anything to do with projects and references, the bulk delete is acceptable for now and the references and the project thing is going next\".",
+    "Karim: \"Great, let's include the batch delete.\"",
+    "Karim: \"let's include adding a generated image as a reference in the prompt for the image studio\" and then clarified to also investigate and include Video Studio in this pass.",
+    "Karim: \"for now clicking the last frame button on the video, lets the script run that and get us the last frame auto download to our laptop and we can do what we want with it from there\".",
+    "Karim: \"in the next feature update when we add an upload sidebar, it would instead put it in the uploads there\".",
+    "Karim: \"for now I don't mind at all if the naming that we do is for the downloaded, so long as that is also metadaated with the server name\".",
+    "Karim wants the displayed/download name to be the assigned user-facing name later in character/location/reference/project views, even if the physical server asset filename stays unchanged.",
+    "First branch/folder name is accepted as feature-dev/omni-v1/.",
+    "Preserve already-working native media paths: Grok video, Nano Banana 2/Pro image, native Codex image, prompt copy, delete, history hydration, and existing .native-media assets.",
+    "Never serve fake provider results as successful user-facing generations.",
+    "Preserve NATIVE_MEDIA_ROOT and runtime provider env; do not remove .native-media."
+  ],
+  "key_decisions_and_rationale": [
+    "Omni runtime should reuse scripts/helpers directly, not call a Codex skill. The existing Nano Banana and Veo runtime pattern is native-media job submission -> gateway adapter -> fixed wrapper script -> scheduler -> verified .native-media asset import.",
+    "The Omni skill is still useful as documentation and reusable operator knowledge. The app integration should copy/adapt the working /home/k8r1m/merlin/bin/genai-omni contract into repo-local native-media-gateway code after tests finish.",
+    "A narrow omniVideoProvider.js is likely cleaner than widening Veo-specific vertexVideoProvider.js unless Omni truly shares the same validation and CLI flags.",
+    "Batch delete should be implemented as frontend selection state over the existing DELETE /api/native-media/v1/library/:jobId flow; no backend batch API is needed for V1.",
+    "Generated image -> Image Studio and Video Studio reference should reuse existing uploadedImageUrls/input state and same-origin native asset URL validation; no generated video references in this branch.",
+    "Last-frame V1 should be a deterministic server-side extraction helper plus streamed PNG download. Auto-importing frames into Uploads or prompt inputs is deferred until the Uploads/sidebar feature exists.",
+    "Naming V1 should persist a user-facing download/display basename on job metadata rather than renaming asset files. This keeps storage simple while enabling future library/reference/project display names.",
+    "Do not add projects, references, characters, collection pages, prompt templates, uploads sidebar, or bulk add-to-project/reference in Omni V1."
+  ],
+  "issues_discovered": [
+    "Graphify query was weak for high-level provider discovery, so narrow rg/sed/nl tracing was used after refreshing the graph.",
+    "The repo has an older src/components studio tree, but active /studio uses components/StandaloneShell.js importing ImageStudio and VideoStudio from the studio package; first-branch UI work should target packages/studio.",
+    "Last-frame old plan had a heavier response option that could mint a temp asset URL. V1 is now narrowed to direct streamed PNG attachment.",
+    "Per-studio naming is not currently present in server metadata. Download-only browser naming would not satisfy Karim's future reference/project display need, so V1 needs a minimal durable metadata field.",
+    "The working Omni wrapper currently lives under /home/k8r1m/merlin/bin/genai-omni. OGAI systemd integration should not depend on that external path long-term.",
+    "Two old untracked sidecar files remain in codex-handoffs/ from earlier sessions: .turns-019f1962 and .turns-019f1a2e."
+  ],
+  "open_questions": [
+    "Karim has not yet declared the Omni tests finished; final test outputs and learnings under /home/k8r1m/merlin/Projects/omni tests/ are still pending.",
+    "Exact final Gemini Omni test learnings, smoke-test pass/fail list, and any script changes from the running tests are still unknown.",
+    "Official current Vertex/Gemini Omni docs still need to be checked after local test results are ready.",
+    "The exact UI location for per-studio naming prefix controls is not finalized.",
+    "The exact job metadata field names for durable display/download names need to be chosen during planning."
+  ],
+  "next_steps": [
+    "Wait for Karim to say the Omni tests are finished before inspecting /home/k8r1m/merlin/Projects/omni tests/.",
+    "After Karim gives the signal, read all relevant Omni test subfolders under /home/k8r1m/merlin/Projects/omni tests/ and extract final script/API learnings.",
+    "Update /home/k8r1m/.codex/skills/generate-media/sub-skills/generate-omni/SKILL.md and any reusable Omni scripts only after verifying the final test results.",
+    "Read official current Gemini Omni/Vertex docs for model name, modalities, file limits, auth behavior, and pricing before planning implementation.",
+    "Create the actual Omni V1 implementation plan under feature-dev/omni-v1/ in plan mode, covering Omni provider, batch delete, generated-image references to both studios, last-frame download helper/endpoint, and durable naming metadata.",
+    "Audit the plan with Multica GLM 5.2 OpenCode and Gemini 3.5 Flash General, then verify each material audit finding before amending the plan.",
+    "Stop before implementation until Karim confirms coding agents for the run.",
+    "When implementation starts, use feature branch/testing on 19400 and keep main/systemd 19300 stable unless Karim says otherwise."
+  ],
+  "read_first": [
+    "/home/k8r1m/Open-Generative-AI/AGENTS.md",
+    "/home/k8r1m/Open-Generative-AI/feature-dev/README.md",
+    "/home/k8r1m/Open-Generative-AI/feature-dev/next-feature-inbox.md",
+    "/home/k8r1m/Open-Generative-AI/feature-dev/omni-v1/README.md",
+    "/home/k8r1m/Open-Generative-AI/feature-dev/omni-v1/research-log.md",
+    "/home/k8r1m/Open-Generative-AI/docs/plans/native-video-last-frame-download-plan.md",
+    "/home/k8r1m/.codex/skills/generate-media/sub-skills/generate-omni/SKILL.md",
+    "/home/k8r1m/merlin/bin/genai-omni",
+    "/home/k8r1m/Open-Generative-AI/native-media-gateway/exports.js",
+    "/home/k8r1m/Open-Generative-AI/native-media-gateway/vertexVideoProvider.js",
+    "/home/k8r1m/Open-Generative-AI/native-media-gateway/bin/genai-video",
+    "/home/k8r1m/Open-Generative-AI/packages/studio/src/nativeModels.js",
+    "/home/k8r1m/Open-Generative-AI/packages/studio/src/nativeMedia.js",
+    "/home/k8r1m/Open-Generative-AI/packages/studio/src/components/ImageStudio.jsx",
+    "/home/k8r1m/Open-Generative-AI/packages/studio/src/components/VideoStudio.jsx",
+    "/home/k8r1m/Open-Generative-AI/codex-handoffs/OGAI-omni-v1-preplan-2026-07-01-2126-019f1dea-codex-preserve.json"
+  ]
+}

@@ -1,0 +1,111 @@
+{
+  "schema_version": "codex-preserve-v1",
+  "agent": "codex",
+  "session_metadata": {
+    "thread_id": "019f1efe-b7c4-7833-acd0-ec96ed2134fa",
+    "thread_name": "OGAI-omni-v1-real-provider",
+    "client_code": "OGAI",
+    "timestamp_ist": "2026-07-02 01:49 IST",
+    "cwd": "/home/k8r1m/Open-Generative-AI",
+    "project_root": "/home/k8r1m/Open-Generative-AI",
+    "rollout_path": "/home/k8r1m/.codex/sessions/2026/07/02/rollout-2026-07-02T00-13-57-019f1efe-b7c4-7833-acd0-ec96ed2134fa.jsonl"
+  },
+  "completed_tasks": [
+    "Created and worked on branch feature/omni-v1-native-media; did not merge to main and did not update or restart 19300.",
+    "Implemented Gemini Omni real-provider gateway path with provider key omni and model id native.vertex.gemini-omni-flash-preview.",
+    "Added NATIVE_MEDIA_LIVE_OMNI=1 real-provider gate; Omni live gate off/misconfigured paths fail visibly and do not create completed fake gallery cards.",
+    "Added native-media-gateway/omniVideoProvider.js and repo-local executable native-media-gateway/bin/genai-omni.",
+    "Added Omni scheduler cap omni: 1 and safe failed-job error categories/messages.",
+    "Added UI catalog entry for Omni and Video Studio failed-job message display with job id.",
+    "Code-reviewer found Omni prompt exposure in publicJob; patched public Omni job projections to strip prompt, parameters, and inputs.",
+    "Karim confirmed the first real Omni generation worked on 19400.",
+    "Fixed Omni card resolution display from stale 480p to 720p via executor subagent; provider/backend behavior unchanged.",
+    "Hosted feature branch on 19400 with gateway on 19335 and all live provider gates enabled for testing.",
+    "Recorded confirmed Omni media to preserve: job-2f59f7dd-999f-435d-a150-758f1efa00cd and asset-5cfbf113-a64c-4435-9599-611e4989dd42.",
+    "Wrote task list at /home/k8r1m/Open-Generative-AI/feature-dev/omni-v1/task-list.md and updated /home/k8r1m/Open-Generative-AI/feature-dev/omni-v1/implementation-state.md."
+  ],
+  "current_state": [
+    "Karim is actively testing the feature branch on http://127.0.0.1:19400.",
+    "Gateway is intended to remain on http://127.0.0.1:19335 with shared NATIVE_MEDIA_ROOT /home/k8r1m/Open-Generative-AI/.native-media.",
+    "Next app was restarted after the 720p UI fix and capability smoke returned 7 models with Omni provider omni and cap 1.",
+    "New issue reported by Karim: after refreshing 19400, new Omni generation cards say No prompt provided where the prompt should be.",
+    "No investigation subagent has been spawned yet for the prompt issue because Karim asked to write task list, update state files, and create handoff first.",
+    "No code fix has been made for the prompt issue.",
+    "The likely suspect to investigate is the post-review change in native-media-gateway/server.js:publicJob() that strips prompt, parameters, and inputs from public Omni job projections."
+  ],
+  "modified_files": [
+    "native-media-gateway/exports.js - Omni model/provider registration, live dispatch, liveOmni queued propagation, safe no-runner failure.",
+    "native-media-gateway/server.js - NATIVE_MEDIA_LIVE_OMNI gate, Omni fail-closed generationOptions, safe public projection including Omni private field stripping.",
+    "native-media-gateway/scheduler.js - provider concurrency cap omni: 1.",
+    "native-media-gateway/omniVideoProvider.js - new Omni provider adapter.",
+    "native-media-gateway/bin/genai-omni - new repo-local executable wrapper.",
+    "packages/studio/src/nativeModels.js - Omni native video model metadata with provider omni.",
+    "packages/studio/src/nativeMedia.js - terminal native errors include job id.",
+    "packages/studio/src/components/VideoStudio.jsx - Omni model behavior, full error display, 720p card display fallback, hidden resolution state clearing.",
+    "tests/nativeOmniVideoProvider.test.js - Omni backend/provider/gateway tests.",
+    "tests/nativeModelCatalog.test.js - Omni catalog tests.",
+    "tests/nativeClientPolling.test.js - Omni failed job id/message test.",
+    "tests/nativeVideoStudioWiring.test.js - Omni UI wiring and 720p card metadata tests.",
+    "tests/nativeRouteVersioning.test.js - Omni live gate route contract.",
+    "tests/fixtures/nativeContract.js - Omni model contract fixtures.",
+    "feature-dev/omni-v1/implementation-state.md - live branch state, verification, media preservation, prompt issue.",
+    "feature-dev/omni-v1/task-list.md - current task list including prompt refresh investigation.",
+    "graphify-out/graph.json - refreshed by executor subagents.",
+    "docs/plans/native-video-last-frame-download-plan.md, feature-dev/README.md, feature-dev/next-feature-inbox.md - pre-existing dirty files from before this implementation; do not assume they belong to the current change without checking diff."
+  ],
+  "constraints_to_preserve": [
+    "Karim: \"Don't do anything now, Just answer my question, recommend to me how we'd go forward now.\" This was followed before implementation resumed.",
+    "Karim: \"ok lets do it and put in the plan to make sure thie new generate video - and the next 2 or 3 that i will probably genberate to test after this little fix, should remian in the UYI for the mian\".",
+    "Karim: \"1 issue when i refreshed tha 19400 the new generations said no prompt provided where the prompt should be written just notre that ... can we get it back,Invest don't change anything, send the subagent don't do it yourself your context is full so first write a task list, write this into the task list update the state files then a session handoff ... don't change anything I'm still testing.\"",
+    "Do not change code while Karim is still testing the prompt issue.",
+    "Use subagents when Karim tells us to; for the prompt issue, next action must be a read-only investigative subagent.",
+    "Do not merge to main until Karim explicitly approves.",
+    "Do not update or restart 19300 until Karim explicitly approves.",
+    "No user-facing fake/dummy successful Omni generation on 19400/runtime.",
+    "Preserve generated Omni media in shared .native-media state; do not clean ignored .native-media.",
+    "Preserve existing Grok video, Nano Banana 2/Pro image, native Codex image, prompt copy, delete, history hydration, and existing .native-media assets."
+  ],
+  "key_decisions_and_rationale": [
+    "Provider key is omni while model id remains native.vertex.gemini-omni-flash-preview, so scheduler ownership and model catalog identity are separate.",
+    "Omni runtime fails closed rather than falling back to fake provider output because 19400 is for real-provider testing only.",
+    "Automated tests use injected fake subprocesses only; runtime fake success for Omni is blocked.",
+    "The 720p display fix is UI-only: request parameters still omit unsupported Omni resolution while card metadata displays the provider output resolution.",
+    "The prompt-redaction change was made after code review to avoid public Omni prompts leaking through publicJob, but it may be the reason refreshed cards now show No prompt provided.",
+    "Generated media preservation is not a git merge concern; it depends on keeping the shared NATIVE_MEDIA_ROOT or copying specific job/asset records by job id."
+  ],
+  "issues_discovered": [
+    "Initial agent mistakenly did a web lookup despite audited plan; Karim corrected course. Do not do further web research unless explicitly asked or a concrete contradiction blocks implementation.",
+    "Code-reviewer found Omni prompts exposed through publicJob and gallery hydration; fixed by stripping prompt, parameters, and inputs from public Omni projections.",
+    "After that fix, Karim reported refreshed 19400 cards show No prompt provided for new Omni generations. This is unresolved and should be investigated read-only.",
+    "Next dev logs include existing warnings about conflicting star exports for isNativeModelId in packages/studio/src/index.js; this was not part of the Omni fix.",
+    "During one Next restart, asset proxy requests showed terminated/socket errors because the process was being stopped while the UI was loading assets; not treated as a code issue.",
+    "Startup reconciliation after restart reported unknown: 6 and unchanged: 106; investigate only if it affects Karim's current media visibility."
+  ],
+  "open_questions": [
+    "Should Omni prompts be shown in the gallery after refresh even though publicJob currently strips them for privacy?",
+    "Are prompts still present privately in .native-media/jobs.json for the affected Omni job records?",
+    "Should the final fix expose a safe prompt field for completed Omni library hydration, or should the UI preserve client-side prompt text separately?",
+    "How many additional Omni test videos will Karim generate before approving merge to main?"
+  ],
+  "next_steps": [
+    "Spawn a read-only investigative subagent for the prompt refresh issue. Do not investigate in the leader lane unless needed to integrate the subagent answer.",
+    "Subagent should inspect .native-media/jobs.json for Omni jobs and verify whether prompts remain stored privately.",
+    "Subagent should inspect native-media-gateway/server.js publicJob, listLibrary/getGeneration projections, and packages/studio/src/components/VideoStudio.jsx normalizeServerHistoryEntry/gallery rendering.",
+    "Subagent should report whether the issue is feature-branch-only or would affect main after merge, and recommend the smallest safe fix.",
+    "Wait for Karim approval before changing code for the prompt issue.",
+    "Keep 19400 running for Karim's testing if possible.",
+    "Before any merge, preserve job-2f59f7dd-999f-435d-a150-758f1efa00cd / asset-5cfbf113-a64c-4435-9599-611e4989dd42 and the next 2-3 Omni test generations Karim creates.",
+    "If Karim approves merge later, merge code to main without updating 19300 until separately approved."
+  ],
+  "read_first": [
+    "/home/k8r1m/Open-Generative-AI/feature-dev/omni-v1/task-list.md",
+    "/home/k8r1m/Open-Generative-AI/feature-dev/omni-v1/implementation-state.md",
+    "/home/k8r1m/Open-Generative-AI/native-media-gateway/server.js",
+    "/home/k8r1m/Open-Generative-AI/native-media-gateway/exports.js",
+    "/home/k8r1m/Open-Generative-AI/packages/studio/src/components/VideoStudio.jsx",
+    "/home/k8r1m/Open-Generative-AI/packages/studio/src/nativeMedia.js",
+    "/home/k8r1m/Open-Generative-AI/tests/nativeOmniVideoProvider.test.js",
+    "/home/k8r1m/Open-Generative-AI/tests/nativeVideoStudioWiring.test.js",
+    "/home/k8r1m/Open-Generative-AI/.native-media/jobs.json"
+  ]
+}

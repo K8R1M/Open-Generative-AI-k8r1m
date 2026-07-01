@@ -38,6 +38,7 @@ const NATIVE_MODEL_IDS = [
   'native.vertex.nano-banana-pro',
   'native.vertex.veo-3.1',
   'native.vertex.veo-3.1-fast',
+  'native.vertex.gemini-omni-flash-preview',
   'native.codex.gpt-image-2',
   'native.grok.imagine-video',
 ];
@@ -65,6 +66,12 @@ const NATIVE_MODEL_DESCRIPTORS = [
     id: 'native.vertex.veo-3.1-fast',
     label: 'Veo 3.1 Fast (Server · Vertex AI)',
     provider: 'vertex',
+    tasks: ['text-to-video', 'image-to-video'],
+  },
+  {
+    id: 'native.vertex.gemini-omni-flash-preview',
+    label: 'Gemini Omni Flash Preview (Server · Vertex AI)',
+    provider: 'omni',
     tasks: ['text-to-video', 'image-to-video'],
   },
   {
@@ -103,6 +110,9 @@ const NATIVE_CAPABILITY_CONSTRAINTS = {
   veoI2vInputMaxBytes: 20 * 1024 * 1024,
   veoMaxReferenceImages: 3,
   veoReferenceDurationSeconds: 8,
+  omniAspectRatios: ['16:9', '9:16'],
+  omniDurationsSeconds: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+  omniMaxReferenceImages: 10,
   codexConcurrency: 1,
   grokDurationsSeconds: [6, 10],
   grokResolutions: ['480p', '720p'],

@@ -19,6 +19,26 @@ test('VideoStudio appends native video models to T2V and I2V lists', () => {
   assert.match(source, /mergedI2VModels = \[\.\.\.i2vModels, \.\.\.NATIVE_I2V_DESCRIPTORS\]/);
 });
 
+test('VideoStudio exposes Omni and keeps failed native jobs out of generated history', () => {
+  assert.match(nativeModelsSource, /native\.vertex\.gemini-omni-flash-preview/);
+  assert.match(nativeModelsSource, /Gemini Omni Flash Preview \(Server · Vertex AI\)/);
+  assert.match(nativeModelsSource, /native\.vertex\.gemini-omni-flash-preview[\s\S]{0,320}text-to-video/);
+  assert.match(nativeModelsSource, /native\.vertex\.gemini-omni-flash-preview[\s\S]{0,340}image-to-video/);
+  assert.match(source, /setGenerateError\(e\.message \|\| "Generation failed"\)/);
+  assert.doesNotMatch(source, /setGenerateError\(e\.message\?\.slice/);
+  assert.match(source, /model\.resolutions\.length === 0\) delete parameters\.resolution/);
+  assert.match(source, /if \(!res\?\.url\) throw new Error\("No video URL returned by API"\);[\s\S]{0,800}addToLocalHistory\(entry\)/);
+});
+
+test('VideoStudio shows Omni card resolution from model output instead of stale selector state', () => {
+  assert.match(source, /const OMNI_VIDEO_DISPLAY_RESOLUTION = "720p"/);
+  assert.match(source, /function nativeVideoCardResolution\(modelOrId, selectedResolution\)/);
+  assert.match(source, /model\?\.provider === "omni"[\s\S]{0,120}model\.resolutions\.length === 0/);
+  assert.match(source, /resolution: nativeVideoCardResolution\(item\.modelId \|\| item\.model, item\.resolution \|\| params\.resolution\)/);
+  assert.match(source, /setSelectedResolution\(""\);[\s\S]{0,80}setShowResolution\(false\)/);
+  assert.match(source, /resolution: nativeVideoCardResolution\(model, selectedResolution\)/);
+});
+
 test('VideoStudio wires Grok as I2V-only and hides unsupported controls', () => {
   assert.match(nativeModelsSource, /native\.grok\.imagine-video/);
   assert.match(nativeModelsSource, /Grok Imagine 1\.5 \(server-native\)/);

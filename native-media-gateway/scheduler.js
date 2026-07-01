@@ -19,7 +19,7 @@
 
 const { spawn } = require('node:child_process');
 
-const PROVIDER_CONCURRENCY = { codex: 1, grok: 1, vertex: 2 };
+const PROVIDER_CONCURRENCY = { codex: 1, grok: 1, omni: 1, vertex: 2 };
 const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000;
 const MIN_TIMEOUT_MS = 1000;
 

@@ -15,7 +15,10 @@ const PRIVATE_JOB_FIELDS = new Set([
   'providerConfig',
   'codexDiagnostics',
   'grokDiagnostics',
+  'omniDiagnostics',
 ]);
+const OMNI_PRIVATE_JOB_FIELDS = new Set(['parameters', 'inputs']);
+const OMNI_MODEL_ID = 'native.vertex.gemini-omni-flash-preview';
 
 function json(res, body, status = 200) {
   const payload = Buffer.from(JSON.stringify(body));
@@ -37,7 +40,7 @@ function safeError(error) {
     return { status: 400, body: { error: 'BAD_REQUEST', message: 'Invalid native media request.' } };
   }
   if (/real provider requested but no real provider runner is available|real provider unavailable/i.test(message)) {
-    return { status: 503, body: { error: 'REAL_PROVIDER_UNAVAILABLE', message } };
+    return { status: 503, body: { error: 'REAL_PROVIDER_UNAVAILABLE', message: 'Native provider unavailable.' } };
   }
   if (/credential|unsupported|required|forbidden|invalid|missing|not found|mime|duration|reference|input|asset|request must be an object/i.test(message)) {
     return { status: 400, body: { error: 'BAD_REQUEST', message: 'Invalid native media request.' } };
@@ -47,6 +50,7 @@ function safeError(error) {
 }
 
 function publicFailureMessage(job) {
+  if (job && job.message) return job.message;
   const detail = String(job && job.detail || '');
   if (!detail) return null;
   const support = /Support codes?:\s*([0-9,\s]+)/i.exec(detail);
@@ -76,7 +80,10 @@ function publicFailureMessage(job) {
 
 function publicJob(job) {
   if (!job || typeof job !== 'object' || Array.isArray(job)) return job;
-  const out = Object.fromEntries(Object.entries(job).filter(([key]) => !PRIVATE_JOB_FIELDS.has(key)));
+  const privateFields = job.provider === 'omni' || job.modelId === OMNI_MODEL_ID || job.model === OMNI_MODEL_ID
+    ? new Set([...PRIVATE_JOB_FIELDS, ...OMNI_PRIVATE_JOB_FIELDS])
+    : PRIVATE_JOB_FIELDS;
+  const out = Object.fromEntries(Object.entries(job).filter(([key]) => !privateFields.has(key)));
   const message = publicFailureMessage(job);
   if (message) out.message = message;
   return out;
@@ -86,20 +93,24 @@ function generationOptions(request = {}) {
   const liveVertex = process.env.NATIVE_MEDIA_LIVE_VERTEX === '1';
   const liveCodex = process.env.NATIVE_MEDIA_LIVE_CODEX === '1';
   const liveGrok = process.env.NATIVE_MEDIA_LIVE_GROK === '1';
+  const liveOmni = process.env.NATIVE_MEDIA_LIVE_OMNI === '1';
   const provider = gateway.providerFor(request && typeof request === 'object' && !Array.isArray(request) ? request.modelId : null);
   const isImage = request && (request.task === 'text-to-image' || request.task === 'image-to-image');
+  const isOmni = provider === 'omni';
   const real =
     (provider === 'vertex' && liveVertex) ||
     (provider === 'codex' && liveCodex) ||
-    (provider === 'grok' && liveGrok);
-  if (isImage && provider && !real) {
-    throw new Error(`real provider unavailable for native image generation: ${provider}`);
+    (provider === 'grok' && liveGrok) ||
+    (provider === 'omni' && liveOmni);
+  if ((isImage || isOmni) && provider && !real) {
+    throw new Error(`real provider unavailable for native generation: ${provider}`);
   }
   return {
-    provider: { fake: isImage ? false : !real },
+    provider: { fake: (isImage || isOmni) ? false : !real },
     liveVertex,
     liveCodex,
     liveGrok,
+    liveOmni,
   };
 }
 

@@ -45,7 +45,11 @@ Before any coding starts:
    - The plan must explicitly preserve existing working features.
 
 7. Audit the plan adversarially with Multica.
-   - Required auditors: GLM 5.2 OpenCode and Gemini 3.5 Flash General.
+   - Required auditors by exact Multica agent name:
+     - `GLM 5.2 - Opencode`
+     - `Gemini 3.5 Flash High - General`
+   - Do not substitute `OMX Gemini 3.5 Flash High - Coder`, `OMX Gemini 3.5 Flash High - Reviewer`, `OMX Gemini 3.5 Flash High - QA`, or any other OMX Gemini agent when this workflow asks for Gemini 3.5 Flash General.
+   - If the exact `Gemini 3.5 Flash High - General` agent fails at runtime, report that failure and retry that exact agent only if Karim asks; do not silently swap in another Gemini agent.
    - Optional additional auditor: Grok 4.3 via Multica.
    - Audits must look for missing requirements, contradictions, omissions, inaccuracies, weak assumptions, bad architecture, duplicate paths, unclear boundaries, and regression risk.
 
