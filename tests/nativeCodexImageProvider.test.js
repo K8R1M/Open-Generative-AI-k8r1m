@@ -233,6 +233,36 @@ test('buildCodexArgs: rejects unsupported model, task, missing prompt, missing l
   );
 });
 
+test('resolveCodexImageSize: maps auto/square/landscape/portrait and rejects invalid pairs', () => {
+  assert.equal(typeof codex.resolveCodexImageSize, 'function', 'Codex provider must export resolveCodexImageSize');
+  assert.equal(codex.resolveCodexImageSize({ aspectRatio: 'auto', imageSize: '1K' }), null);
+  assert.equal(codex.resolveCodexImageSize({ aspectRatio: '1:1', imageSize: '1K' }), '1024x1024');
+  assert.equal(codex.resolveCodexImageSize({ aspectRatio: '16:9', imageSize: '2K' }), '2048x1152');
+  assert.equal(codex.resolveCodexImageSize({ aspectRatio: '9:16', imageSize: '2K' }), '1152x2048');
+  assert.equal(codex.resolveCodexImageSize({ aspectRatio: '4:3', imageSize: '4K' }), '4096x3072');
+  assert.equal(codex.resolveCodexImageSize({ aspectRatio: '3:4', imageSize: '4K' }), '3072x4096');
+  assert.throws(
+    () => codex.resolveCodexImageSize({ aspectRatio: '21:9', imageSize: '2K' }),
+    /aspect|invalid/i
+  );
+  assert.throws(
+    () => codex.resolveCodexImageSize({ aspectRatio: '1:1', imageSize: '512' }),
+    /size|invalid/i
+  );
+});
+
+test('buildCodexArgs: uses prompt size guidance instead of unsupported --size flag', () => {
+  const argv = codex.buildCodexArgs({
+    modelId: 'native.codex.gpt-image-2',
+    task: 'text-to-image',
+    prompt: 'p',
+    parameters: { aspectRatio: '16:9', imageSize: '2K' },
+    lastMessagePath: '/j/last.txt',
+  });
+  assert.ok(!argv.includes('--size'));
+  assert.match(argv[argv.length - 1], /Target output preference: 2K 16:9 \(2048x1152 target table\)/);
+});
+
 // --------------------------------------------------------------- input validation
 
 test('validateCodexImageInputs: rejects non-asset, bad MIME, oversize, too many references', async () => {

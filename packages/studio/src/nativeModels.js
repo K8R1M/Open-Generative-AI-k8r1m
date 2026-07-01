@@ -8,6 +8,7 @@ export const NATIVE_MODEL_IDS = [
   'native.vertex.veo-3.1',
   'native.vertex.veo-3.1-fast',
   'native.codex.gpt-image-2',
+  'native.grok.imagine-video',
 ];
 
 export const NATIVE_MODELS = [
@@ -17,8 +18,8 @@ export const NATIVE_MODELS = [
     provider: 'vertex',
     kind: 'image',
     tasks: ['text-to-image', 'image-to-image'],
-    aspectRatios: ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'],
-    imageSizes: ['512', '1K', '2K'],
+    aspectRatios: ['16:9', '1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '21:9'],
+    imageSizes: ['1K', '512'],
     maxReferences: 10,
   },
   {
@@ -27,7 +28,7 @@ export const NATIVE_MODELS = [
     provider: 'vertex',
     kind: 'image',
     tasks: ['text-to-image', 'image-to-image'],
-    aspectRatios: ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'],
+    aspectRatios: ['16:9', '1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '21:9'],
     imageSizes: ['1K', '2K'],
     maxReferences: 1,
   },
@@ -43,6 +44,9 @@ export const NATIVE_MODELS = [
     maxReferenceImages: NATIVE_VEO_REFERENCE_IMAGES_ENABLED ? 3 : 0,
     referenceImagesEnabled: NATIVE_VEO_REFERENCE_IMAGES_ENABLED,
     referenceDurationSeconds: 8,
+    supportsAspectRatio: true,
+    supportsAudioToggle: true,
+    supportsLastFrame: true,
   },
   {
     id: 'native.vertex.veo-3.1-fast',
@@ -56,6 +60,9 @@ export const NATIVE_MODELS = [
     maxReferenceImages: NATIVE_VEO_REFERENCE_IMAGES_ENABLED ? 3 : 0,
     referenceImagesEnabled: NATIVE_VEO_REFERENCE_IMAGES_ENABLED,
     referenceDurationSeconds: 8,
+    supportsAspectRatio: true,
+    supportsAudioToggle: true,
+    supportsLastFrame: true,
   },
   {
     id: 'native.codex.gpt-image-2',
@@ -63,14 +70,33 @@ export const NATIVE_MODELS = [
     provider: 'codex',
     kind: 'image',
     tasks: ['text-to-image', 'image-to-image'],
+    aspectRatios: ['auto', '1:1', '16:9', '9:16', '4:3', '3:4'],
+    imageSizes: ['1K', '2K', '4K'],
+    defaultAspectRatio: 'auto',
+    defaultImageSize: '1K',
     maxReferences: 10,
+  },
+  {
+    id: 'native.grok.imagine-video',
+    label: 'Grok Imagine 1.5 (server-native)',
+    provider: 'grok',
+    kind: 'video',
+    tasks: ['image-to-video'],
+    durationsSeconds: [6, 10],
+    resolutions: ['480p', '720p'],
+    maxReferenceImages: 6,
+    supportsAspectRatio: false,
+    supportsAudioToggle: false,
+    supportsLastFrame: false,
   },
 ];
 
 export const NATIVE_CAPABILITY_CONSTRAINTS = {
-  nanoBananaAspectRatios: ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'],
-  nanoBanana2ImageSizes: ['512', '1K', '2K'],
+  nanoBananaAspectRatios: ['16:9', '1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '21:9'],
+  nanoBanana2ImageSizes: ['1K', '512'],
   nanoBananaProImageSizes: ['1K', '2K'],
+  codexGptImage2AspectRatios: ['auto', '1:1', '16:9', '9:16', '4:3', '3:4'],
+  codexGptImage2ImageSizes: ['1K', '2K', '4K'],
   nanoBananaMaxReferences: 10,
   nanoBananaInputMaxBytes: 7 * 1024 * 1024,
   veoAspectRatios: ['16:9', '9:16'],
@@ -79,6 +105,9 @@ export const NATIVE_CAPABILITY_CONSTRAINTS = {
   veoI2vInputMaxBytes: 20 * 1024 * 1024,
   veoMaxReferenceImages: NATIVE_VEO_REFERENCE_IMAGES_ENABLED ? 3 : 0,
   veoReferenceDurationSeconds: 8,
+  grokImagineVideoDurationsSeconds: [6, 10],
+  grokImagineVideoResolutions: ['480p', '720p'],
+  grokImagineVideoMaxReferenceImages: 6,
   codexConcurrency: 1,
 };
 

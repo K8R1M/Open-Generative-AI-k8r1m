@@ -27,6 +27,11 @@ test('credential denylist covers MuAPI, Google, and Codex surfaces', () => {
     NATIVE_CREDENTIAL_DENYLIST.substrings.includes('private_key'),
     'denylist must guard service-account private key material'
   );
+  assert.ok(
+    NATIVE_CREDENTIAL_DENYLIST.substrings.includes('XAI_API_KEY') &&
+      NATIVE_CREDENTIAL_DENYLIST.substrings.includes('GROK_API_KEY'),
+    'denylist must guard Grok/xAI API key env vars'
+  );
 });
 
 function serializedContainsDenylistedLowerCased(serialized) {
@@ -86,6 +91,17 @@ test('gateway rejects client-supplied provider credential fields (pending C1a)',
       }),
     /credential|forbidden|not allowed/i,
     'gateway must reject client-supplied credential fields'
+  );
+  assert.throws(
+    () =>
+      validate({
+        modelId: 'native.grok.imagine-video',
+        task: 'image-to-video',
+        prompt: 'x',
+        parameters: { XAI_API_KEY: 'secret' },
+      }),
+    /credential|forbidden|not allowed/i,
+    'gateway must reject nested Grok/xAI credential-shaped parameters before persistence'
   );
 });
 

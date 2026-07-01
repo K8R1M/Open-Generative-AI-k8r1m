@@ -1,0 +1,76 @@
+{
+  "schema_version": "codex-preserve-v1",
+  "agent": "codex",
+  "session_metadata": {
+    "thread_id": "019f1962-1a3e-7d61-a0b3-fff89af074b8",
+    "thread_name": "OpenGenerativeAI-grok-imagine-video-provider",
+    "client_code": "OpenGenerativeAI",
+    "timestamp_ist": "2026-06-30 22:06 IST",
+    "cwd": "/home/k8r1m/Open-Generative-AI",
+    "project_root": "/home/k8r1m/Open-Generative-AI",
+    "rollout_path": "/home/k8r1m/.codex/sessions/2026/06/30/rollout-2026-06-30T22-04-47-019f1962-1a3e-7d61-a0b3-fff89af074b8.jsonl"
+  },
+  "completed_tasks": [
+    "Read prompt-provided AGENTS.md instructions and confirmed no project-local AGENTS.md exists in /home/k8r1m/Open-Generative-AI.",
+    "Read docs/plans/README.md, grok-imagine-video-provider-context.md, grok-imagine-video-provider-plan.md, grok-imagine-video-provider-task-list.md, and grok-imagine-video-provider-audit-status.md.",
+    "Refreshed Graphify before implementation with graphify update . --force; graphify-out/graph.json rebuilt with 7293 nodes and 7708 edges.",
+    "Updated durable plan docs with implementation branch, port, orchestration-only main-agent rule, native executor/code-reviewer requirements, Grok 480p/720p support, and merge gates."
+  ],
+  "current_state": [
+    "Implementation is approved to proceed on branch feat/native-grok-imagine-video after this preserve handoff is validated and indexed.",
+    "The main agent should orchestrate/integrate only; implementation work is assigned to native executor subagents using the installed executor role settings gpt-5.5 medium.",
+    "Review work is assigned to separate native code-reviewer subagents using the installed code-reviewer role settings gpt-5.5 high.",
+    "The test app port is 19400; live Grok gateway testing uses NATIVE_MEDIA_LIVE_GROK=1.",
+    "Working tree currently includes untracked docs/plans files and a Graphify refresh change in graphify-out/graph.json."
+  ],
+  "modified_files": [
+    "docs/plans/grok-imagine-video-provider-context.md - implementation startup, branch, port, Graphify, and merge-gate state",
+    "docs/plans/grok-imagine-video-provider-plan.md - approved implementation orchestration and merge-gate state",
+    "docs/plans/grok-imagine-video-provider-task-list.md - pre-implementation checklist and merge readiness gates",
+    "docs/plans/grok-imagine-video-provider-audit-status.md - implementation gate details",
+    "graphify-out/graph.json - pre-implementation Graphify refresh",
+    "codex-handoffs/OpenGenerativeAI-grok-imagine-video-provider-2026-06-30-2206-019f1962-codex-preserve.json - this preserve handoff"
+  ],
+  "constraints_to_preserve": [
+    "Branch: feat/native-grok-imagine-video.",
+    "Test app port: 19400.",
+    "Main agent only orchestrates.",
+    "Coding by native executor agents, fixed gpt-5.5 medium.",
+    "Review by separate native code-reviewer agents, fixed gpt-5.5 high.",
+    "Grok supports selectable 480p and 720p.",
+    "Merge blocked until tests, 19400 smoke, cancel smoke, no-leak checks, Graphify refresh, and code-reviewer approval pass.",
+    "Karim added: make sure to use graphify - update it to halp be efficient then also after code changes - and use the subagents as describe by plan you just orchestrate.",
+    "Karim added: Anything that can SAFELY be done in parralell should be.",
+    "Never revert user changes unless Karim explicitly asks."
+  ],
+  "key_decisions_and_rationale": [
+    "Use the existing native media gateway flow instead of a separate Grok route to preserve keyless native access, credential stripping, job polling, cancel/timeout semantics, and same-origin asset URLs.",
+    "Catalog ID remains native.grok.imagine-video rather than hard-coding 1.5 because the local Grok CLI wrapper is the integration surface and official REST docs split image-to-video from reference-to-video model support.",
+    "Default to no new shared adapter utilities; add one only if the Grok adapter creates concrete duplication in touched code.",
+    "Use Graphify before implementation and again after meaningful code changes to keep codebase navigation and durable graph state current."
+  ],
+  "issues_discovered": [
+    "Project-local AGENTS.md was not present in /home/k8r1m/Open-Generative-AI; prompt-provided AGENTS.md instructions are the active contract.",
+    "Initial find for AGENTS.md ran broader than ideal and was interrupted after showing unrelated nearby files; no project-local AGENTS.md was found.",
+    "graphify update . --force changed graphify-out/graph.json before implementation; refresh again after code changes before signoff."
+  ],
+  "open_questions": [
+    "Whether the live Grok CLI is currently authenticated is unknown until smoke testing.",
+    "Whether canceling the wrapper also terminates any nested Grok process must be proven by cancel smoke before merge."
+  ],
+  "next_steps": [
+    "Validate and index this preserve handoff.",
+    "Run git status --short --branch and git diff --stat, then create branch feat/native-grok-imagine-video.",
+    "Use Graphify queries for focused orientation, then spawn native executor subagents for gateway/provider/scheduler, Studio/native-client, and tests/docs slices.",
+    "Integrate executor patches, run targeted and broad native tests, run build, and start gateway/app on port 19400 for smoke checks.",
+    "Run cancel smoke and no-leak checks, refresh Graphify after code changes, update docs/plans statuses, then spawn separate code-reviewer subagents for merge-gate review."
+  ],
+  "read_first": [
+    "/home/k8r1m/Open-Generative-AI/docs/plans/README.md",
+    "/home/k8r1m/Open-Generative-AI/docs/plans/grok-imagine-video-provider-context.md",
+    "/home/k8r1m/Open-Generative-AI/docs/plans/grok-imagine-video-provider-plan.md",
+    "/home/k8r1m/Open-Generative-AI/docs/plans/grok-imagine-video-provider-task-list.md",
+    "/home/k8r1m/Open-Generative-AI/docs/plans/grok-imagine-video-provider-audit-status.md",
+    "/home/k8r1m/Open-Generative-AI/graphify-out/graph.json"
+  ]
+}

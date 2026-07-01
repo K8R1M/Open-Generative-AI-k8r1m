@@ -196,6 +196,32 @@ test('buildVertexImageArgs: aspectRatio and imageSize map to wrapper flags', () 
   assert.equal(argv[argv.indexOf('--image-size') + 1], '2K');
 });
 
+test('buildVertexImageArgs: rejects stale Nano Banana 2 2K requests before spawn', () => {
+  assert.throws(
+    () =>
+      vertex.buildVertexImageArgs({
+        modelId: 'native.vertex.nano-banana-2',
+        task: 'text-to-image',
+        prompt: 'p',
+        parameters: { imageSize: '2K' },
+        outputPath: '/o.png',
+      }),
+    /Nano Banana 2|imageSize|2K/i
+  );
+});
+
+test('gateway.submitGeneration: rejects stale Nano Banana 2 2K requests before provider work', async () => {
+  await assert.rejects(
+    () => gateway.submitGeneration({
+      modelId: 'native.vertex.nano-banana-2',
+      task: 'text-to-image',
+      prompt: 'p',
+      parameters: { imageSize: '2K' },
+    }),
+    /Nano Banana 2|imageSize|2K/i
+  );
+});
+
 test('buildVertexImageArgs: rejects unsupported Vertex image model', () => {
   assert.throws(
     () => vertex.buildVertexImageArgs({ modelId: 'native.vertex.veo-3.1', task: 'text-to-image', prompt: 'p', outputPath: '/o.png' }),
@@ -366,7 +392,7 @@ test('resolveInputAssets: rejects missing asset before provider call', async () 
 
 // ---------------------------------------------------------- environment boundary
 
-test('buildEnv: copies only allowlisted keys and drops credentials unless worker ADC gate is set', () => {
+test('buildEnv: copies only allowlisted keys and forwards worker ADC without leaking other credentials', () => {
   const env = vertex.buildEnv({
     PATH: '/usr/bin',
     HOME: '/h',
@@ -379,13 +405,13 @@ test('buildEnv: copies only allowlisted keys and drops credentials unless worker
   assert.equal(env.PATH, '/usr/bin');
   assert.equal(env.HOME, '/h');
   assert.equal(env.GOOGLE_CLOUD_PROJECT, 'proj-x');
-  assert.equal(env.GOOGLE_APPLICATION_CREDENTIALS, undefined, 'service-account path must require the worker ADC gate');
-  assert.equal(env.NATIVE_MEDIA_ALLOW_GOOGLE_APPLICATION_CREDENTIALS, undefined);
+  assert.equal(env.GOOGLE_APPLICATION_CREDENTIALS, '/secret/sa.json', 'gateway ADC must reach the wrapper child');
+  assert.equal(env.NATIVE_MEDIA_ALLOW_GOOGLE_APPLICATION_CREDENTIALS, '1', 'wrapper must keep gateway ADC instead of stripping it');
   assert.equal(env.GEMINI_API_KEY, undefined, 'API keys must never be passed through');
   assert.equal(env.RANDOM_BAD, undefined, 'non-allowlisted env must not leak to the wrapper child');
 });
 
-test('buildEnv: passes service-account ADC only when the trusted worker gate is set', () => {
+test('buildEnv: preserves explicit worker ADC allow marker when present', () => {
   const env = vertex.buildEnv({
     PATH: '/usr/bin',
     GOOGLE_CLOUD_PROJECT: 'proj-x',
@@ -441,11 +467,11 @@ test('live runner uses fixed python + script paths with shell:false', async () =
   assert.equal(captured.opts.detached, false, 'must not detach Vertex wrappers under the Next route');
   assert.deepEqual(captured.opts.stdio, ['ignore', 'pipe', 'pipe']);
   assert.equal(registerMeta.killGroup, false, 'non-detached Vertex wrappers must use child/PID cancellation');
-  assert.equal(captured.opts.env.GOOGLE_APPLICATION_CREDENTIALS, undefined, 'env allowlist must drop service-account paths unless gated');
+  assert.equal(captured.opts.env.GOOGLE_APPLICATION_CREDENTIALS, undefined, 'missing gateway ADC must not invent credentials');
   assert.equal(captured.opts.env.PATH, '/bin', 'allowlisted operational env must pass through');
 });
 
-test('live runner forwards gated worker service-account ADC env to the wrapper child', async () => {
+test('live runner forwards gateway service-account ADC env to the wrapper child', async () => {
   let captured;
   const spawnProbe = (cmd, argv, opts) => {
     captured = { cmd, argv, opts };
@@ -467,7 +493,6 @@ test('live runner forwards gated worker service-account ADC env to the wrapper c
         PATH: '/bin',
         GOOGLE_CLOUD_PROJECT: 'proj-x',
         GOOGLE_APPLICATION_CREDENTIALS: '/service/accounts/native.json',
-        NATIVE_MEDIA_ALLOW_GOOGLE_APPLICATION_CREDENTIALS: '1',
       },
     }
   );
@@ -479,6 +504,7 @@ test('live runner forwards gated worker service-account ADC env to the wrapper c
 test('runVertexImageProvider: live Vertex image failures retain redacted provider stderr privately', async () => {
   const rid = 'c5-stderr-' + Date.now();
   const prompt = 'secret-ish image prompt';
+  const credentialPath = '/service/accounts/native.json';
   const settled = [];
   const ctx = {
     scheduler,
@@ -501,7 +527,7 @@ test('runVertexImageProvider: live Vertex image failures retain redacted provide
   const spawnWithStderr = (cmd, argv, opts) => {
     const child = new FakeChild(argv, opts);
     setTimeout(() => {
-      child.stderr.emit('data', Buffer.from(`Vertex image error in ${process.cwd()}: ${prompt}`));
+      child.stderr.emit('data', Buffer.from(`Vertex image error in ${process.cwd()}: ${prompt}: ${credentialPath}`));
       child.emit('exit', 1, null);
     }, 10);
     return child;
@@ -510,7 +536,7 @@ test('runVertexImageProvider: live Vertex image failures retain redacted provide
     { id: rid },
     { modelId: 'native.vertex.nano-banana-pro', task: 'text-to-image', prompt, parameters: {}, inputs: [] },
     ctx,
-    { spawn: spawnWithStderr }
+    { spawn: spawnWithStderr, env: { GOOGLE_APPLICATION_CREDENTIALS: credentialPath } }
   );
   await waitFor(() => settled.length > 0, { timeoutMs: 2000 });
   assert.equal(settled[0].status, 'INTERRUPTED_PROCESS');
@@ -518,6 +544,8 @@ test('runVertexImageProvider: live Vertex image failures retain redacted provide
   assert.match(settled[0].detail, /Vertex image error/);
   assert.match(settled[0].detail, /<repo>|<prompt>/);
   assert.doesNotMatch(settled[0].detail, new RegExp(prompt));
+  assert.doesNotMatch(settled[0].detail, new RegExp(credentialPath));
+  assert.match(settled[0].detail, /<google-credentials>/);
 });
 
 test('default image wrapper paths are repo-local', () => {

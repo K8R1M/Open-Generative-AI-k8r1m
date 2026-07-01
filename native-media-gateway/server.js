@@ -14,6 +14,7 @@ const PRIVATE_JOB_FIELDS = new Set([
   'subprocessProvider',
   'providerConfig',
   'codexDiagnostics',
+  'grokDiagnostics',
 ]);
 
 function json(res, body, status = 200) {
@@ -25,9 +26,20 @@ function json(res, body, status = 200) {
   res.end(payload);
 }
 
+function noContent(res) {
+  res.writeHead(204);
+  res.end();
+}
+
 function safeError(error) {
   const message = String(error && error.message || '');
-  if (/credential|unsupported|required|forbidden|invalid|missing|not found|mime|duration|reference|input|asset/i.test(message)) {
+  if (error instanceof SyntaxError) {
+    return { status: 400, body: { error: 'BAD_REQUEST', message: 'Invalid native media request.' } };
+  }
+  if (/real provider requested but no real provider runner is available|real provider unavailable/i.test(message)) {
+    return { status: 503, body: { error: 'REAL_PROVIDER_UNAVAILABLE', message } };
+  }
+  if (/credential|unsupported|required|forbidden|invalid|missing|not found|mime|duration|reference|input|asset|request must be an object/i.test(message)) {
     return { status: 400, body: { error: 'BAD_REQUEST', message: 'Invalid native media request.' } };
   }
   console.error('[native-media-gateway]', error);
@@ -50,6 +62,15 @@ function publicFailureMessage(job) {
   if (/Reauthentication is needed|gcloud auth application-default login|RefreshError/i.test(detail)) {
     return 'Vertex authentication failed before generation. The native worker needs valid Google Application Default Credentials or a configured service account.';
   }
+  if (/Grok timed out|TIMEOUT/i.test(detail)) {
+    return 'Grok video generation timed out before a verified MP4 was available. Try a shorter or simpler prompt.';
+  }
+  if (/usage guidelines|safety|policy|filtered/i.test(detail)) {
+    return 'Grok could not generate the video under provider safety rules. Try a different input image or prompt.';
+  }
+  if (/Grok CLI not found|grok_imagine_video|GROK_IMAGINE_CLI|auth|login|permission/i.test(detail)) {
+    return 'Grok video generation failed before completion. The native worker may need local Grok CLI setup.';
+  }
   return null;
 }
 
@@ -61,13 +82,24 @@ function publicJob(job) {
   return out;
 }
 
-function generationOptions() {
+function generationOptions(request = {}) {
   const liveVertex = process.env.NATIVE_MEDIA_LIVE_VERTEX === '1';
   const liveCodex = process.env.NATIVE_MEDIA_LIVE_CODEX === '1';
+  const liveGrok = process.env.NATIVE_MEDIA_LIVE_GROK === '1';
+  const provider = gateway.providerFor(request && typeof request === 'object' && !Array.isArray(request) ? request.modelId : null);
+  const isImage = request && (request.task === 'text-to-image' || request.task === 'image-to-image');
+  const real =
+    (provider === 'vertex' && liveVertex) ||
+    (provider === 'codex' && liveCodex) ||
+    (provider === 'grok' && liveGrok);
+  if (isImage && provider && !real) {
+    throw new Error(`real provider unavailable for native image generation: ${provider}`);
+  }
   return {
-    provider: { fake: !(liveVertex || liveCodex) },
+    provider: { fake: isImage ? false : !real },
     liveVertex,
     liveCodex,
+    liveGrok,
   };
 }
 
@@ -189,12 +221,21 @@ function streamAsset(res, asset, rangeHeader) {
 
 async function handleNativeRequest(req, res) {
   const url = new URL(req.url, `http://${HOST}`);
-  const [resource, id] = routeParts(url);
+  const parts = routeParts(url);
+  const [resource, id] = parts;
   try {
     if (req.method === 'GET') {
       if (!resource || resource === 'health') return json(res, { ok: true, service: 'native-media' });
       if (resource === 'ready') return json(res, { ok: true, ready: true });
       if (resource === 'capabilities') return json(res, gateway.getNativeCapabilities());
+      if (resource === 'library' && !id) {
+        const library = await gateway.listLibrary({
+          kind: url.searchParams.get('kind') || 'all',
+          limit: url.searchParams.get('limit') || 100,
+          cursor: url.searchParams.get('cursor') || 0,
+        });
+        return json(res, { ...library, items: library.items.map(publicJob) });
+      }
       if (resource === 'generations' && id) {
         const job = await gateway.getGeneration(id);
         return job ? json(res, publicJob(job)) : json(res, { error: 'generation not found' }, 404);
@@ -207,13 +248,18 @@ async function handleNativeRequest(req, res) {
     if (req.method === 'POST') {
       if (resource === 'uploads') return json(res, await uploadFromRequest(req, url), 201);
       if (resource === 'generations') {
-        const job = await gateway.submitGeneration(await readJson(req), generationOptions());
+        const body = await readJson(req);
+        const job = await gateway.submitGeneration(body, generationOptions(body));
         return json(res, publicJob(job), 201);
       }
     }
     if (req.method === 'DELETE' && resource === 'generations' && id) {
       const job = await gateway.cancelGeneration(id);
       return job ? json(res, publicJob(job)) : json(res, { error: 'generation not found' }, 404);
+    }
+    if (req.method === 'DELETE' && resource === 'library' && id && parts.length === 2) {
+      const job = await gateway.deleteLibraryJob(id);
+      return job ? noContent(res) : json(res, { error: 'library job not found' }, 404);
     }
     return json(res, { error: 'native media route not found' }, 404);
   } catch (error) {
@@ -227,10 +273,12 @@ function createServer() {
 }
 
 async function start() {
-  await gateway.reconcileOnRestart();
+  const counts = await gateway.reconcileOnRestart();
+  const store = await gateway.getStoreInfo();
   const port = Number(process.env.NATIVE_MEDIA_GATEWAY_PORT || DEFAULT_PORT);
   const server = createServer();
   await new Promise((resolve) => server.listen(port, HOST, resolve));
+  console.log(`[native-media-gateway] root=${store.root} jobs=${store.jobs} assets=${store.assets} uploads=${store.uploads} reconcile=${JSON.stringify(counts)}`);
   console.log(`[native-media-gateway] listening on http://${HOST}:${port}`);
   return server;
 }

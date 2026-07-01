@@ -8,11 +8,12 @@ const scheduler = require('./scheduler.js');
 const vertexImageProvider = require('./vertexImageProvider.js');
 const vertexVideoProvider = require('./vertexVideoProvider.js');
 const codexImageProvider = require('./codexImageProvider.js');
+const grokVideoProvider = require('./grokVideoProvider.js');
 
 function storeRoot() {
   return process.env.NATIVE_MEDIA_ROOT
     ? path.resolve(process.env.NATIVE_MEDIA_ROOT)
-    : path.resolve(process.cwd(), '.native-media');
+    : path.resolve(__dirname, '..', '.native-media');
 }
 const ROOT = storeRoot();
 const JOBS_FILE = path.join(ROOT, 'jobs.json');
@@ -29,11 +30,12 @@ const MODELS = [
   { id: 'native.vertex.veo-3.1', label: 'Veo 3.1 (Server · Vertex AI)', provider: 'vertex', tasks: ['text-to-video', 'image-to-video'] },
   { id: 'native.vertex.veo-3.1-fast', label: 'Veo 3.1 Fast (Server · Vertex AI)', provider: 'vertex', tasks: ['text-to-video', 'image-to-video'] },
   { id: 'native.codex.gpt-image-2', label: 'GPT Image 2 (Server · Codex)', provider: 'codex', tasks: ['text-to-image', 'image-to-image'] },
+  { id: 'native.grok.imagine-video', label: 'Grok Imagine 1.5 (server-native)', provider: 'grok', tasks: ['image-to-video'] },
 ];
 
 const CAPABILITY_CONSTRAINTS = {
   nanoBananaAspectRatios: ['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'],
-  nanoBanana2ImageSizes: ['512', '1K', '2K'],
+  nanoBanana2ImageSizes: ['1K', '512'],
   nanoBananaProImageSizes: ['1K', '2K'],
   nanoBananaMaxReferences: 10,
   nanoBananaInputMaxBytes: 7 * 1024 * 1024,
@@ -43,6 +45,10 @@ const CAPABILITY_CONSTRAINTS = {
   veoI2vInputMaxBytes: 20 * 1024 * 1024,
   veoMaxReferenceImages: 3,
   veoReferenceDurationSeconds: 8,
+  grokDurationsSeconds: [6, 10],
+  grokResolutions: ['480p', '720p'],
+  grokMaxReferenceImages: 6,
+  grokI2vInputMaxBytes: 20 * 1024 * 1024,
   codexConcurrency: 1,
   // V1 single-host scheduler caps per provider.
   providerConcurrency: scheduler.PROVIDER_CONCURRENCY,
@@ -52,24 +58,34 @@ const CREDENTIAL_FIELDS = new Set([
   'apiKey',
   'api_key',
   'x-api-key',
+  'xai_api_key',
+  'xaiApiKey',
+  'XAI_API_KEY',
+  'grok_api_key',
+  'grokApiKey',
+  'GROK_API_KEY',
   'googleApplicationCredentials',
   'serviceAccountJson',
   'accessToken',
   'access_token',
+  'token',
+  'auth',
   'idToken',
   'codexAuth',
+  'grokAuth',
   'authorization',
   'cookie',
 ]);
 
 const PNG_1X1_B64 =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMB/axl56QAAAAASUVORK5CYII=';
-const MP4_HEX = '00000018667479706d703432000000006d70343269736f6d000000086d646174';
+const MP4_HEX = '000000206674797069736f6d0000020069736f6d69736f32617663316d703431000003176d6f6f760000006c6d766864000000000000000000000000000003e8000000280001000001000000000000000000000000010000000000000000000000000000000100000000000000000000000000004000000000000000000000000000000000000000000000000000000000000002000002417472616b0000005c746b686400000003000000000000000000000001000000000000002800000000000000000000000000000000000100000000000000000000000000000001000000000000000000000000000040000000000200000002000000000024656474730000001c656c73740000000000000001000000280000000000010000000001b96d646961000000206d646864000000000000000000000000000032000000020055c400000000002d68646c72000000000000000076696465000000000000000000000000566964656f48616e646c657200000001646d696e6600000014766d68640000000100000000000000000000002464696e660000001c6472656600000000000000010000000c75726c2000000001000001247374626c000000c0737473640000000000000001000000b061766331000000000000000100000000000000000000000000000000000200020048000000480000000000000001154c61766336302e33312e313032206c696278323634000000000000000000000018ffff00000036617663430164000affe100196764000aacd95f8888c044000003000400000300c83c48965801000668ebe3cb22c0fdf8f80000000010706173700000000100000001000000146274727400000000000229e8000229e80000001873747473000000000000000100000001000002000000001c737473630000000000000001000000010000000100000001000000147374737a00000000000002c500000001000000147374636f00000000000000010000034700000062756474610000005a6d657461000000000000002168646c7200000000000000006d6469726170706c0000000000000000000000002d696c737400000025a9746f6f0000001d6461746100000001000000004c61766636302e31362e3130300000000866726565000002cd6d646174000002ae0605ffffaadc45e9bde6d948b7962cd820d923eeef78323634202d20636f7265203136342072333130382033316531396639202d20482e3236342f4d5045472d342041564320636f646563202d20436f70796c65667420323030332d32303233202d20687474703a2f2f7777772e766964656f6c616e2e6f72672f783236342e68746d6c202d206f7074696f6e733a2063616261633d31207265663d33206465626c6f636b3d313a303a3020616e616c7973653d3078333a3078313133206d653d686578207375626d653d37207073793d31207073795f72643d312e30303a302e3030206d697865645f7265663d31206d655f72616e67653d3136206368726f6d615f6d653d31207472656c6c69733d31203878386463743d312063716d3d3020646561647a6f6e653d32312c313120666173745f70736b69703d31206368726f6d615f71705f6f66667365743d2d3220746872656164733d31206c6f6f6b61686561645f746872656164733d3120736c696365645f746872656164733d30206e723d3020646563696d6174653d3120696e7465726c616365643d3020626c757261795f636f6d7061743d3020636f6e73747261696e65645f696e7472613d3020626672616d65733d3320625f707972616d69643d3220625f61646170743d3120625f626961733d30206469726563743d3120776569676874623d31206f70656e5f676f703d3020776569676874703d32206b6579696e743d323530206b6579696e745f6d696e3d3235207363656e656375743d343020696e7472615f726566726573683d302072635f6c6f6f6b61686561643d34302072633d637266206d62747265653d31206372663d32332e302071636f6d703d302e36302071706d696e3d302071706d61783d3639207170737465703d342069705f726174696f3d312e34302061713d313a312e303000800000000f658884002bfffef6737c0a6b6db181';
 const PNG_1X1 = Buffer.from(PNG_1X1_B64, 'base64');
 const MP4_STUB = Buffer.from(MP4_HEX, 'hex');
 
 const idempotencyLocks = new Map();
 const queuedLaunchOptions = new Map();
+let jobsWriteQueue = Promise.resolve();
 const ALLOWED_INPUT_ROLES = new Set(['first-frame', 'last-frame', 'input', 'start-frame', 'end-frame', 'reference']);
 
 // --- Fake subprocess script (kept here so the gateway ships no extra file) ---
@@ -117,6 +133,18 @@ async function writeJsonAtomic(file, value) {
   await fsp.rename(tmp, file);
 }
 
+async function updateJobsAtomic(mutator) {
+  const nextWrite = jobsWriteQueue.catch(() => {}).then(async () => {
+    await ensureStore();
+    const jobs = readJsonSync(JOBS_FILE);
+    const result = await mutator(jobs);
+    await writeJsonAtomic(JOBS_FILE, jobs);
+    return result;
+  });
+  jobsWriteQueue = nextWrite.catch(() => {});
+  return nextWrite;
+}
+
 function emit(onEvent, event) {
   if (typeof onEvent === 'function') onEvent(event);
 }
@@ -142,6 +170,10 @@ function assetUrl(assetId) {
   return `${ASSET_URL_PREFIX}${assetId}`;
 }
 
+function isSafeAssetId(assetId) {
+  return !!assetId && typeof assetId === 'string' && !/[/\\]/.test(assetId) && !assetId.includes('..');
+}
+
 function extensionForMime(mime) {
   if (mime === 'image/png') return 'png';
   if (mime === 'image/jpeg') return 'jpg';
@@ -162,10 +194,15 @@ function sniffMime(bytes, fallback = '') {
 function validateCredentialFree(value, trail = []) {
   if (!value || typeof value !== 'object') return;
   for (const [key, nested] of Object.entries(value)) {
-    if (CREDENTIAL_FIELDS.has(key)) {
+    const normalizedKey = String(key).replace(/[-_\s]/g, '').toLowerCase();
+    if (
+      CREDENTIAL_FIELDS.has(key) ||
+      CREDENTIAL_FIELDS.has(String(key).toLowerCase()) ||
+      /^(apikey|xapikey|xaiapikey|grokapikey|googleapplicationcredentials|serviceaccountjson|accesstoken|idtoken|codexauth|grokauth|authorization|cookie|token|auth|secret|credential|privatekey)$/.test(normalizedKey)
+    ) {
       throw new Error(`client-supplied provider credential field is forbidden: ${[...trail, key].join('.')}`);
     }
-    if (typeof nested === 'string' && /private_key|BEGIN PRIVATE KEY|GOOGLE_APPLICATION_CREDENTIALS|service_account/i.test(nested)) {
+    if (typeof nested === 'string' && /private_key|BEGIN PRIVATE KEY|GOOGLE_APPLICATION_CREDENTIALS|service_account|XAI_API_KEY|GROK_API_KEY/i.test(nested)) {
       throw new Error(`client-supplied provider credential value is forbidden: ${[...trail, key].join('.')}`);
     }
     validateCredentialFree(nested, [...trail, key]);
@@ -179,6 +216,9 @@ function validateGenerationRequest(request) {
   if (!request.prompt || typeof request.prompt !== 'string') throw new Error('prompt is required');
   const model = MODELS.find((m) => m.id === request.modelId);
   if (!model.tasks.includes(request.task)) throw new Error(`unsupported native task for model: ${request.task}`);
+  if (model.id === 'native.vertex.nano-banana-2' && request.parameters && request.parameters.imageSize === '2K') {
+    throw new Error('Nano Banana 2 imageSize 2K is not supported');
+  }
   const inputs = Array.isArray(request.inputs) ? request.inputs : [];
   if (model.id === 'native.vertex.nano-banana-pro') {
     const referenceCount = inputs.reduce((count, input) => count + (input && input.role === 'reference' ? 1 : 0), 0);
@@ -288,12 +328,12 @@ function spawnFakeSubprocess(job, request, providerOpts) {
 
 // Persist a terminal patch onto a job and emit a terminal event.
 async function persistJobPatch(jobId, patch, onEvent) {
-  await ensureStore();
-  const jobs = readJsonSync(JOBS_FILE);
-  const prev = jobs[jobId] || {};
-  const next = { ...prev, ...patch, id: prev.id || jobId, request_id: prev.request_id || jobId, updatedAt: new Date().toISOString() };
-  jobs[jobId] = next;
-  await writeJsonAtomic(JOBS_FILE, jobs);
+  const next = await updateJobsAtomic((jobs) => {
+    const prev = jobs[jobId] || {};
+    const job = { ...prev, ...patch, id: prev.id || jobId, request_id: prev.request_id || jobId, updatedAt: new Date().toISOString() };
+    jobs[jobId] = job;
+    return job;
+  });
   if (onEvent) emit(onEvent, { type: 'job_terminal', jobId, status: next.status });
   return next;
 }
@@ -328,6 +368,7 @@ async function drainQueued(provider) {
         provider: job.providerConfig || { fake: true },
         liveVertex: job.liveVertex === true || launchOptions.liveVertex === true,
         liveCodex: job.liveCodex === true || launchOptions.liveCodex === true,
+        liveGrok: job.liveGrok === true || launchOptions.liveGrok === true,
       });
     } catch (err) {
       await persistJobPatch(job.id, { status: 'failed', error: 'DRAIN_LAUNCH_FAILED', detail: String(err && err.message) });
@@ -565,6 +606,41 @@ async function launchProviderWork(job, clean, options) {
     return runningJob;
   }
 
+  if (
+    options.liveGrok === true &&
+    grokVideoProvider.liveGrokEnabled() &&
+    grokVideoProvider.isGrokVideoModel(clean.modelId)
+  ) {
+    let live;
+    try {
+      live = await grokVideoProvider.runGrokVideoProvider(runningJob, clean, {
+        scheduler,
+        register: registerProviderSubprocess,
+        getAsset,
+        tmpDir: TMP_DIR,
+      }, { spawn: options.spawn, timeoutMs: options.timeoutMs });
+    } catch (err) {
+      await failBeforeRegistration(err);
+    }
+    if (registrationPersist) await registrationPersist;
+    runningJob = {
+      ...runningJob,
+      ...registrationPatch,
+      pid: live.child.pid,
+      pgid: registrationPatch ? registrationPatch.pgid : live.child.pid,
+      outputPath: live.outputPath,
+      expectedMime: live.expectedMime,
+    };
+    await persistJobPatch(job.id, {
+      pid: live.child.pid,
+      pgid: runningJob.pgid,
+      outputPath: live.outputPath,
+      expectedMime: live.expectedMime,
+      subprocessProvider: provider,
+    });
+    return runningJob;
+  }
+
   if (providerOpts.fake === false && typeof options.runProvider === 'function') {
     // Real provider adapter path (C5/C6/C7). The adapter spawns the provider
     // subprocess and registers it with the scheduler using the same hooks.
@@ -684,13 +760,14 @@ async function submitGeneration(request, options = {}) {
 
 async function submitGenerationUnlocked(clean, options = {}) {
   await ensureStore();
-  const jobs = readJsonSync(JOBS_FILE);
   const idempotency = readJsonSync(IDEMPOTENCY_FILE);
   const idempotencyKey = clean && clean.clientRequestId || null;
-
-  if (idempotencyKey && idempotency[idempotencyKey] && jobs[idempotency[idempotencyKey]]) {
-    return jobs[idempotency[idempotencyKey]];
+  const existingJobId = idempotencyKey && idempotency[idempotencyKey];
+  if (existingJobId) {
+    const existingJob = readJsonSync(JOBS_FILE)[existingJobId];
+    if (existingJob) return existingJob;
   }
+
   clean = validateGenerationRequest(clean);
   await validateInputAssets(clean);
 
@@ -714,11 +791,18 @@ async function submitGenerationUnlocked(clean, options = {}) {
     providerConfig: options.provider || { fake: true },
     liveVertex: options.liveVertex === true,
     liveCodex: options.liveCodex === true,
+    liveGrok: options.liveGrok === true,
   };
 
-  jobs[id] = job;
+  const created = await updateJobsAtomic((jobs) => {
+    if (idempotencyKey && idempotency[idempotencyKey] && jobs[idempotency[idempotencyKey]]) {
+      return { job: jobs[idempotency[idempotencyKey]], isNew: false };
+    }
+    jobs[id] = job;
+    return { job, isNew: true };
+  });
+  if (!created.isNew) return created.job;
   if (idempotencyKey) idempotency[idempotencyKey] = id;
-  await writeJsonAtomic(JOBS_FILE, jobs);
   await writeJsonAtomic(IDEMPOTENCY_FILE, idempotency);
   emit(options.onEvent, { type: 'job_created', jobId: id });
 
@@ -737,6 +821,68 @@ async function submitGenerationUnlocked(clean, options = {}) {
 async function getGeneration(id) {
   await ensureStore();
   return readJsonSync(JOBS_FILE)[id] || null;
+}
+
+async function readGeneratedAsset(assetId) {
+  if (!isSafeAssetId(assetId)) return null;
+  await ensureStore();
+  const dir = path.join(ASSETS_DIR, path.basename(assetId));
+  try {
+    const metaPath = path.join(dir, 'meta.json');
+    const meta = JSON.parse(await fsp.readFile(metaPath, 'utf8'));
+    const file = meta.path;
+    if (!file || path.basename(path.dirname(file)) !== assetId) return null;
+    const realAssets = await fsp.realpath(ASSETS_DIR);
+    const realFile = await fsp.realpath(file);
+    if (path.relative(realAssets, realFile).startsWith('..') || path.isAbsolute(path.relative(realAssets, realFile))) return null;
+    if (path.basename(path.dirname(realFile)) !== assetId) return null;
+    const stats = await fsp.stat(realFile);
+    if (!stats.isFile()) return null;
+    return { ...meta, path: realFile, size: stats.size };
+  } catch {
+    return null;
+  }
+}
+
+async function listLibrary({ kind = 'all', limit = 100, cursor = 0 } = {}) {
+  await ensureStore();
+  if (!['image', 'video', 'all'].includes(kind)) throw new Error('invalid library kind');
+  const start = Math.max(0, Number(cursor) || 0);
+  const cappedLimit = Math.max(1, Math.min(100, Number(limit) || 100));
+  const jobs = Object.values(readJsonSync(JOBS_FILE))
+    .filter((job) => job && job.status === 'completed' && !job.deletedAt && job.assetId)
+    .sort((a, b) => {
+      const byTime = String(b.completedAt || b.updatedAt || b.createdAt || '').localeCompare(String(a.completedAt || a.updatedAt || a.createdAt || ''));
+      return byTime || String(b.id || '').localeCompare(String(a.id || ''));
+    });
+
+  const items = [];
+  let index = start;
+  for (; index < jobs.length && items.length < cappedLimit; index++) {
+    const asset = await readGeneratedAsset(jobs[index].assetId);
+    if (!asset) continue;
+    if (kind !== 'all' && !String(asset.mime || '').startsWith(`${kind}/`)) continue;
+    items.push({ ...jobs[index], jobId: jobs[index].id, asset: { assetId: asset.assetId, id: asset.id, mime: asset.mime, url: asset.url, size: asset.size } });
+  }
+  return { items, nextCursor: index < jobs.length ? String(index) : null };
+}
+
+async function deleteLibraryJob(jobId) {
+  if (!jobId || typeof jobId !== 'string' || /[/\\]/.test(jobId) || jobId.includes('..')) throw new Error('invalid library job id');
+  let assetDir = null;
+  const tombstoned = await updateJobsAtomic(async (jobs) => {
+    const job = jobs[jobId];
+    if (!job || job.status !== 'completed' || job.deletedAt) return null;
+    if (!isSafeAssetId(job.assetId)) throw new Error('invalid native media asset id');
+    const asset = await readGeneratedAsset(job.assetId);
+    if (asset) assetDir = path.dirname(asset.path);
+    const now = new Date().toISOString();
+    jobs[jobId] = { ...job, status: 'asset_deleted', assetDeleted: true, deletedAt: now, assetDeletedAt: now, updatedAt: now };
+    return jobs[jobId];
+  });
+  if (!tombstoned) return null;
+  if (assetDir) await fsp.rm(assetDir, { recursive: true, force: true });
+  return tombstoned;
 }
 
 async function cancelGeneration(id) {
@@ -843,6 +989,24 @@ async function getAsset(assetId) {
   return null;
 }
 
+async function getStoreInfo() {
+  await ensureStore();
+  const jobs = readJsonSync(JOBS_FILE);
+  const countEntries = async (dir) => {
+    try {
+      return (await fsp.readdir(dir)).length;
+    } catch {
+      return 0;
+    }
+  };
+  return {
+    root: ROOT,
+    jobs: Object.keys(jobs).length,
+    assets: await countEntries(ASSETS_DIR),
+    uploads: await countEntries(UPLOADS_DIR),
+  };
+}
+
 const PROVIDER_CONCURRENCY = scheduler.PROVIDER_CONCURRENCY;
 
 module.exports = {
@@ -853,13 +1017,17 @@ module.exports = {
   vertexImageProvider,
   vertexVideoProvider,
   codexImageProvider,
+  grokVideoProvider,
   assetUrl,
   cancelGeneration,
   cancelJob: cancelGeneration,
   createGeneration: submitGeneration,
+  deleteLibraryJob,
   getAsset,
   getGeneration,
   getNativeCapabilities,
+  getStoreInfo,
+  listLibrary,
   providerFor,
   reconcileJob,
   reconcileOnRestart,
@@ -869,4 +1037,5 @@ module.exports = {
   validateGenerationRequest,
   validateRequest: validateGenerationRequest,
   validateUpload,
+  _storeRootForTest: ROOT,
 };

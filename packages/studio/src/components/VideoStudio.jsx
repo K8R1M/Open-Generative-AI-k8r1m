@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
+import { Copy, Trash2 } from "lucide-react";
 import { generateVideo, generateI2V, processV2V, uploadFile } from "../muapi.js";
 import {
   t2vModels,
@@ -23,29 +24,35 @@ import {
   isNativeModelId,
   nativeModelById,
 } from "../nativeModels.js";
-import { generateNativeMedia, uploadNativeFile } from "../nativeMedia.js";
+import { copyPromptToClipboard, deleteNativeLibraryItem, generateNativeMedia, listNativeLibrary, uploadNativeFile } from "../nativeMedia.js";
 
 // ── tiny helpers ──────────────────────────────────────────────────────────────
 
+const NATIVE_GROK_IMAGINE_VIDEO_ID = "native.grok.imagine-video";
+
 function nativeVideoModelToDescriptor(m) {
-  const aspectRatios = m.aspectRatios || ["16:9"];
+  const aspectRatios = m.supportsAspectRatio === false ? [] : (m.aspectRatios || ["16:9"]);
   const durations = m.durationsSeconds || [8];
   const resolutions = m.resolutions || ["720p"];
-  return {
+  const inputs = {
+    prompt: { name: "prompt", type: "string" },
+    duration: { enum: durations, default: durations[0] || 8 },
+    resolution: { enum: resolutions, default: resolutions[0] || "720p" },
+  };
+  if (aspectRatios.length > 0) {
+    inputs.aspect_ratio = { enum: aspectRatios, default: aspectRatios[0] || "16:9" };
+  }
+  const descriptor = {
     id: m.id,
     name: m.label,
     endpoint: m.id,
     native: true,
     imageField: "images_list",
-    lastImageField: "last_image",
     maxImages: 1 + (m.maxReferenceImages || 0),
-    inputs: {
-      prompt: { name: "prompt", type: "string" },
-      aspect_ratio: { enum: aspectRatios, default: aspectRatios[0] || "16:9" },
-      duration: { enum: durations, default: durations[0] || 8 },
-      resolution: { enum: resolutions, default: resolutions[0] || "720p" },
-    },
+    inputs,
   };
+  if (m.supportsLastFrame !== false) descriptor.lastImageField = "last_image";
+  return descriptor;
 }
 
 const NATIVE_T2V_DESCRIPTORS = NATIVE_MODELS.filter(
@@ -58,10 +65,15 @@ const NATIVE_I2V_DESCRIPTORS = NATIVE_MODELS.filter(
 
 const mergedT2VModels = [...t2vModels, ...NATIVE_T2V_DESCRIPTORS];
 const mergedI2VModels = [...i2vModels, ...NATIVE_I2V_DESCRIPTORS];
+const nativeGrokI2VDescriptor = NATIVE_I2V_DESCRIPTORS.find((m) => m.id === NATIVE_GROK_IMAGINE_VIDEO_ID);
+const t2vPickerModels = nativeGrokI2VDescriptor
+  ? [...mergedT2VModels, nativeGrokI2VDescriptor]
+  : mergedT2VModels;
 
 function getAspectRatiosForT2VNative(modelId) {
   if (isNativeModelId(modelId)) {
-    return nativeModelById(modelId)?.aspectRatios || ["16:9"];
+    const m = nativeModelById(modelId);
+    return m?.supportsAspectRatio === false ? [] : (m?.aspectRatios || ["16:9"]);
   }
   return getAspectRatiosForVideoModel(modelId);
 }
@@ -82,7 +94,8 @@ function getResolutionsForT2VNative(modelId) {
 
 function getAspectRatiosForI2VNative(modelId) {
   if (isNativeModelId(modelId)) {
-    return nativeModelById(modelId)?.aspectRatios || ["16:9"];
+    const m = nativeModelById(modelId);
+    return m?.supportsAspectRatio === false ? [] : (m?.aspectRatios || ["16:9"]);
   }
   return getAspectRatiosForI2VModel(modelId);
 }
@@ -107,6 +120,41 @@ function getMaxImagesForI2VNative(modelId) {
     return 1 + (m?.maxReferenceImages || 0);
   }
   return getMaxImagesForI2VModel(modelId);
+}
+
+function nativeVideoReferencesEnabled(model) {
+  return model?.id === NATIVE_GROK_IMAGINE_VIDEO_ID || Number(model?.maxReferenceImages || 0) > 0;
+}
+
+function isNativeI2VOnlyModel(model) {
+  return model?.kind === "video" && model.tasks?.includes("image-to-video") && !model.tasks?.includes("text-to-video");
+}
+
+function shouldUseNativeImageUpload(modelId) {
+  const model = nativeModelById(modelId);
+  return (
+    model?.id === NATIVE_GROK_IMAGINE_VIDEO_ID ||
+    (model?.kind === "video" && model.tasks?.includes("image-to-video"))
+  );
+}
+
+async function uploadVideoStudioImage(modelId, apiKey, file, onProgress) {
+  if (shouldUseNativeImageUpload(modelId)) {
+    return (await uploadNativeFile(file)).url;
+  }
+  return uploadFile(apiKey, file, onProgress);
+}
+
+function nativeVideoParams(model, selectedAr, selectedDuration, selectedResolution, selectedAudio) {
+  const parameters = {
+    aspectRatio: selectedAr,
+    durationSeconds: Number(selectedDuration),
+    resolution: selectedResolution,
+    audio: selectedAudio,
+  };
+  if (model?.supportsAspectRatio === false) delete parameters.aspectRatio;
+  if (model?.supportsAudioToggle === false) delete parameters.audio;
+  return parameters;
 }
 
 function nativeInputFromUrl(url, role) {
@@ -138,6 +186,51 @@ async function downloadFile(url, filename) {
   } catch {
     window.open(url, "_blank");
   }
+}
+
+function normalizeServerHistoryEntry(item) {
+  const url = item?.url || item?.outputs?.[0];
+  if (!url) return null;
+  const params = item.parameters || {};
+  return {
+    id: item.jobId || item.id,
+    jobId: item.jobId || item.id,
+    url,
+    prompt: item.prompt || "",
+    model: item.modelId || item.model,
+    aspect_ratio: item.aspectRatio || item.aspect_ratio || params.aspectRatio || params.aspect_ratio,
+    duration: item.duration || item.durationSeconds || params.duration || params.durationSeconds,
+    resolution: item.resolution || params.resolution,
+    timestamp: item.createdAt || item.completedAt || new Date().toISOString(),
+    native: true,
+    serverBacked: true,
+  };
+}
+
+function historyKeys(entry) {
+  return [entry?.jobId, entry?.request_id, entry?.id, entry?.url].filter(Boolean);
+}
+
+function sameHistoryEntry(a, b) {
+  return historyKeys(a).some((key) => historyKeys(b).includes(key));
+}
+
+function mergeServerHistory(local, server) {
+  const seen = new Set();
+  const serverKeys = new Set();
+  const out = [];
+  for (const entry of server.map(normalizeServerHistoryEntry).filter(Boolean)) {
+    historyKeys(entry).forEach((key) => seen.add(key));
+    historyKeys(entry).forEach((key) => serverKeys.add(key));
+    out.push(entry);
+  }
+  for (const entry of local || []) {
+    if (entry?.serverBacked && entry?.native && !historyKeys(entry).some((key) => serverKeys.has(key))) continue;
+    if (historyKeys(entry).some((key) => seen.has(key))) continue;
+    historyKeys(entry).forEach((key) => seen.add(key));
+    out.push(entry);
+  }
+  return out.slice(0, 50);
 }
 
 // ── SVG icons (kept inline to avoid extra deps) ───────────────────────────────
@@ -205,7 +298,7 @@ function DropdownItem({ label, selected, onClick }) {
 function ModelDropdown({ imageMode, selectedModel, onSelect, onClose }) {
   const [search, setSearch] = useState("");
 
-  const generationModels = imageMode ? mergedI2VModels : mergedT2VModels;
+  const generationModels = imageMode ? mergedI2VModels : t2vPickerModels;
 
   const lf = search.toLowerCase();
   const filteredMain = generationModels.filter(
@@ -539,7 +632,7 @@ export default function VideoStudio({
       }
 
       setSelectedAudio(true);
-      setShowAudio(isNativeModelId(modelId));
+      setShowAudio(isNativeModelId(modelId) && nativeModelById(modelId)?.supportsAudioToggle !== false);
     },
     [],
   );
@@ -547,6 +640,7 @@ export default function VideoStudio({
   // ── Persistence: Load ────────────────────────────────────────────────────
   useEffect(() => {
     try {
+      let restoredHistory = [];
       const stored = localStorage.getItem(PERSIST_KEY);
       if (stored) {
         const data = JSON.parse(stored);
@@ -569,7 +663,10 @@ export default function VideoStudio({
         if (data.uploadedVideoUrl) setUploadedVideoUrl(data.uploadedVideoUrl);
         if (data.uploadedVideoName) setUploadedVideoName(data.uploadedVideoName);
         if (data.prompt) setPrompt(data.prompt);
-        if (data.localHistory) setLocalHistory(data.localHistory);
+        if (data.localHistory) {
+          restoredHistory = data.localHistory;
+          setLocalHistory(restoredHistory);
+        }
 
         // Update control visibility based on restored model/mode
         applyControlsForModel(
@@ -579,6 +676,9 @@ export default function VideoStudio({
         );
         if (data.selectedAudio !== undefined) setSelectedAudio(!!data.selectedAudio);
       }
+      listNativeLibrary({ kind: "video", limit: 50 })
+        .then((items) => setLocalHistory((prev) => mergeServerHistory(prev.length ? prev : restoredHistory, items)))
+        .catch((err) => console.warn("Failed to hydrate VideoStudio library:", err));
     } catch (err) {
       console.warn("Failed to load VideoStudio persistence:", err);
     } finally {
@@ -658,11 +758,9 @@ export default function VideoStudio({
     setImageUploading(true);
     setImageProgress(0);
     try {
-      const url = isNativeModelId(selectedModel)
-        ? (await uploadNativeFile(file)).url
-        : await uploadFile(apiKey, file, (pct) => {
-            setImageProgress(pct);
-          });
+      const url = await uploadVideoStudioImage(selectedModel, apiKey, file, (pct) => {
+        setImageProgress(pct);
+      });
       setUploadedImageUrl(url);
       setUploadedVideoUrl(null);
       setUploadedVideoName(null);
@@ -793,11 +891,9 @@ export default function VideoStudio({
     setImageProgress(0);
 
     try {
-      const url = isNativeModelId(selectedModel)
-        ? (await uploadNativeFile(file)).url
-        : await uploadFile(apiKey, file, (pct) => {
-            setImageProgress(pct);
-          });
+      const url = await uploadVideoStudioImage(selectedModel, apiKey, file, (pct) => {
+        setImageProgress(pct);
+      });
       setUploadedImageUrl(url);
 
       // Motion-control v2v: image is a second input, not a mode switch
@@ -904,11 +1000,9 @@ export default function VideoStudio({
     setEndImageUploading(true);
     setEndImageProgress(0);
     try {
-      const url = isNativeModelId(selectedModel)
-        ? (await uploadNativeFile(file)).url
-        : await uploadFile(apiKey, file, (pct) => {
-            setEndImageProgress(pct);
-          });
+      const url = await uploadVideoStudioImage(selectedModel, apiKey, file, (pct) => {
+        setEndImageProgress(pct);
+      });
       setUploadedEndImageUrl(url);
     } catch (err) {
       alert(`End frame upload failed: ${err.message}`);
@@ -998,15 +1092,20 @@ export default function VideoStudio({
           setPromptDisabled(true);
         }
       } else {
+        const nativeModel = nativeModelById(m.id);
         if (v2vMode) {
           setV2vMode(false);
           setUploadedVideoUrl(null);
           setUploadedVideoName(null);
           setPromptDisabled(false);
         }
+        const forceImageMode = !imageMode && isNativeI2VOnlyModel(nativeModel);
+        if (forceImageMode) {
+          setImageMode(true);
+        }
         setSelectedModel(m.id);
-        setSelectedModelName(m.name);
-        applyControlsForModel(m.id, imageMode, false);
+        setSelectedModelName(nativeModel?.label || m.name);
+        applyControlsForModel(m.id, imageMode || forceImageMode, false);
       }
     },
     [v2vMode, imageMode, applyControlsForModel],
@@ -1016,6 +1115,21 @@ export default function VideoStudio({
   const addToLocalHistory = useCallback((entry) => {
     setLocalHistory((prev) => [entry, ...prev].slice(0, 30));
     setActiveHistoryIdx(0);
+  }, []);
+
+  const deleteHistoryEntry = useCallback(async (entry) => {
+    if (!confirm("Delete this generation from the interface and server? This cannot be undone.")) return;
+    const jobId = entry?.jobId || entry?.request_id || (entry?.serverBacked ? entry?.id : null);
+    if (entry?.serverBacked && jobId) {
+      try {
+        await deleteNativeLibraryItem(jobId);
+      } catch (err) {
+        console.warn("Failed to delete VideoStudio library item:", err);
+        alert("Failed to delete generation from server.");
+        return;
+      }
+    }
+    setLocalHistory((prev) => prev.filter((item) => item !== entry && !sameHistoryEntry(item, entry)));
   }, []);
 
   // ── show result in canvas ─────────────────────────────────────────────────
@@ -1073,13 +1187,16 @@ export default function VideoStudio({
 
     if (imageMode && isNativeModelId(selectedModel)) {
       const model = nativeModelById(selectedModel);
-      const refCount = model?.referenceImagesEnabled ? Math.max(0, uploadedImageUrls.length - 1) : 0;
-      const requiredDuration = model?.referenceDurationSeconds || 8;
-      if (uploadedEndImageUrl && Number(selectedDuration) !== requiredDuration) {
-        alert(`Veo last frame requires ${requiredDuration}s duration.`);
-        return;
+      const referenceImagesEnabled = model?.referenceImagesEnabled || nativeVideoReferencesEnabled(model);
+      const refCount = referenceImagesEnabled ? Math.max(0, uploadedImageUrls.length - 1) : 0;
+      const requiredDuration = model?.provider === "vertex" ? model?.referenceDurationSeconds || 8 : model?.referenceDurationSeconds;
+      if (uploadedEndImageUrl && model?.supportsLastFrame !== false && requiredDuration) {
+        if (uploadedEndImageUrl && Number(selectedDuration) !== requiredDuration) {
+          alert(`Veo last frame requires ${requiredDuration}s duration.`);
+          return;
+        }
       }
-      if (refCount > 0 && Number(selectedDuration) !== requiredDuration) {
+      if (refCount > 0 && requiredDuration && Number(selectedDuration) !== requiredDuration) {
         alert(`Veo reference images require ${requiredDuration}s duration.`);
         return;
       }
@@ -1132,22 +1249,20 @@ export default function VideoStudio({
         const maxImgs = getMaxImagesForI2VNative(selectedModel);
         if (isNativeModelId(selectedModel)) {
           const model = nativeModelById(selectedModel);
-          const imageUrls = model?.referenceImagesEnabled ? uploadedImageUrls : uploadedImageUrls.slice(0, 1);
+          const referenceImagesEnabled = model?.referenceImagesEnabled || nativeVideoReferencesEnabled(model);
+          const imageUrls = referenceImagesEnabled ? uploadedImageUrls : uploadedImageUrls.slice(0, 1);
           const inputs = imageUrls
             .map((u, idx) => nativeInputFromUrl(u, idx === 0 ? "first-frame" : "reference"))
             .filter(Boolean);
-          const endFrame = nativeInputFromUrl(uploadedEndImageUrl, "last-frame");
-          if (endFrame) inputs.push(endFrame);
+          if (model?.supportsLastFrame !== false) {
+            const endFrame = nativeInputFromUrl(uploadedEndImageUrl, "last-frame");
+            if (endFrame) inputs.push(endFrame);
+          }
           res = await generateNativeMedia({
             modelId: selectedModel,
             task: "image-to-video",
             prompt: trimmedPrompt,
-            parameters: {
-              aspectRatio: selectedAr,
-              durationSeconds: Number(selectedDuration),
-              resolution: selectedResolution,
-              audio: selectedAudio,
-            },
+            parameters: nativeVideoParams(model, selectedAr, selectedDuration, selectedResolution, selectedAudio),
             inputs,
           });
           if (!res?.url) throw new Error("No video URL returned by API");
@@ -1157,6 +1272,7 @@ export default function VideoStudio({
           setLastGenerationModel(null);
           const entry = {
             id: genId,
+            jobId: genId,
             url: res.url,
             prompt: trimmedPrompt,
             model: selectedModel,
@@ -1164,6 +1280,8 @@ export default function VideoStudio({
             duration: selectedDuration,
             resolution: selectedResolution,
             timestamp: new Date().toISOString(),
+            native: true,
+            serverBacked: true,
           };
           addToLocalHistory(entry);
           showVideoInCanvas(res.url, selectedModel);
@@ -1228,16 +1346,12 @@ export default function VideoStudio({
       } else {
         // T2V (including extend mode)
         if (isNativeModelId(selectedModel)) {
+          const model = nativeModelById(selectedModel);
           res = await generateNativeMedia({
             modelId: selectedModel,
             task: "text-to-video",
             prompt: trimmedPrompt,
-            parameters: {
-              aspectRatio: selectedAr,
-              durationSeconds: Number(selectedDuration),
-              resolution: selectedResolution,
-              audio: selectedAudio,
-            },
+            parameters: nativeVideoParams(model, selectedAr, selectedDuration, selectedResolution, selectedAudio),
           });
           if (!res?.url) throw new Error("No video URL returned by API");
 
@@ -1246,6 +1360,7 @@ export default function VideoStudio({
           setLastGenerationModel(null);
           const entry = {
             id: genId,
+            jobId: genId,
             url: res.url,
             prompt: trimmedPrompt,
             model: selectedModel,
@@ -1253,6 +1368,8 @@ export default function VideoStudio({
             duration: selectedDuration,
             resolution: selectedResolution,
             timestamp: new Date().toISOString(),
+            native: true,
+            serverBacked: true,
           };
           addToLocalHistory(entry);
           showVideoInCanvas(res.url, selectedModel);
@@ -1468,6 +1585,28 @@ export default function VideoStudio({
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
                         <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3" />
                       </svg>
+                    </button>
+                    <button
+                      type="button"
+                      title="Copy prompt"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        copyPromptToClipboard(entry.prompt);
+                      }}
+                      className="p-2 bg-black/60 backdrop-blur-md rounded-full text-white hover:bg-primary hover:text-black transition-all border border-white/10"
+                    >
+                      <Copy size={14} strokeWidth={2.5} />
+                    </button>
+                    <button
+                      type="button"
+                      title="Delete"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        deleteHistoryEntry(entry);
+                      }}
+                      className="p-2 bg-black/60 backdrop-blur-md rounded-full text-white hover:bg-red-500 hover:text-white transition-all border border-white/10"
+                    >
+                      <Trash2 size={14} strokeWidth={2.5} />
                     </button>
                     {isSeedance2 && (
                       <button

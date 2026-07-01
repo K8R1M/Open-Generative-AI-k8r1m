@@ -28,6 +28,8 @@ const NATIVE_ROUTES = [
   'POST /api/native-media/v1/generations',
   'GET /api/native-media/v1/generations/:id',
   'DELETE /api/native-media/v1/generations/:id',
+  'GET /api/native-media/v1/library',
+  'DELETE /api/native-media/v1/library/:jobId',
   'GET /api/native-media/v1/assets/:assetId',
 ];
 
@@ -37,6 +39,7 @@ const NATIVE_MODEL_IDS = [
   'native.vertex.veo-3.1',
   'native.vertex.veo-3.1-fast',
   'native.codex.gpt-image-2',
+  'native.grok.imagine-video',
 ];
 
 const NATIVE_MODEL_DESCRIPTORS = [
@@ -69,6 +72,16 @@ const NATIVE_MODEL_DESCRIPTORS = [
     label: 'GPT Image 2 (Server · Codex)',
     provider: 'codex',
     tasks: ['text-to-image', 'image-to-image'],
+    aspectRatios: ['auto', '1:1', '16:9', '9:16', '4:3', '3:4'],
+    imageSizes: ['1K', '2K', '4K'],
+    defaultAspectRatio: 'auto',
+    defaultImageSize: '1K',
+  },
+  {
+    id: 'native.grok.imagine-video',
+    label: 'Grok Imagine 1.5 (server-native)',
+    provider: 'grok',
+    tasks: ['image-to-video'],
   },
 ];
 
@@ -76,10 +89,14 @@ const NATIVE_CAPABILITY_CONSTRAINTS = {
   nanoBananaAspectRatios: [
     '1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9',
   ],
-  nanoBanana2ImageSizes: ['512', '1K', '2K'],
+  nanoBanana2ImageSizes: ['1K', '512'],
   nanoBananaProImageSizes: ['1K', '2K'],
   nanoBananaMaxReferences: 10,
   nanoBananaInputMaxBytes: 7 * 1024 * 1024,
+  codexAspectRatios: ['auto', '1:1', '16:9', '9:16', '4:3', '3:4'],
+  codexImageSizes: ['1K', '2K', '4K'],
+  codexDefaultAspectRatio: 'auto',
+  codexDefaultImageSize: '1K',
   veoAspectRatios: ['16:9', '9:16'],
   veoDurationsSeconds: [4, 6, 8],
   veoResolutions: ['720p', '1080p'],
@@ -87,6 +104,12 @@ const NATIVE_CAPABILITY_CONSTRAINTS = {
   veoMaxReferenceImages: 3,
   veoReferenceDurationSeconds: 8,
   codexConcurrency: 1,
+  grokDurationsSeconds: [6, 10],
+  grokResolutions: ['480p', '720p'],
+  grokMaxReferenceImages: 6,
+  grokSupportsAspectRatio: false,
+  grokSupportsAudioToggle: false,
+  grokSupportsLastFrame: false,
 };
 
 const NATIVE_REQUEST_ENVELOPE = {
@@ -126,6 +149,7 @@ const NATIVE_CREDENTIAL_DENYLIST = {
     'google_application_credentials',
     'x-goog-api-key',
     'x-codex-auth',
+    'x-grok-auth',
   ],
   bodyFields: [
     'apiKey',
@@ -137,6 +161,7 @@ const NATIVE_CREDENTIAL_DENYLIST = {
     'access_token',
     'idToken',
     'codexAuth',
+    'grokAuth',
   ],
   substrings: [
     'GOOGLE_APPLICATION_CREDENTIALS',
@@ -144,6 +169,8 @@ const NATIVE_CREDENTIAL_DENYLIST = {
     'client_email',
     'BEGIN PRIVATE KEY',
     'service_account',
+    'XAI_API_KEY',
+    'GROK_API_KEY',
   ],
 };
 

@@ -4,8 +4,7 @@
 //
 // It is NOT a raw Vertex/GCS transport. It spawns the wrapper with `shell:false`,
 // fixed executable paths, and a narrow environment allowlist. Service-account
-// ADC may pass only when the worker explicitly opts in with
-// `NATIVE_MEDIA_ALLOW_GOOGLE_APPLICATION_CREDENTIALS=1`.
+// ADC may pass only from the trusted worker environment.
 // registers the resulting subprocess with the C1b single-host scheduler so
 // cancel/timeout/restart reconciliation reuse the same hooks as the fake runner.
 //
@@ -16,7 +15,7 @@
 //
 // No service-account JSON, GCS bucket, or Google auth header is read, logged, or
 // surfaced here. The wrapper loads managed credentials from its own .env or from
-// the gated worker env; browser/client input can never supply credentials.
+// the trusted worker env; browser/client input can never supply credentials.
 
 const path = require('node:path');
 const fsp = require('node:fs/promises');
@@ -48,7 +47,7 @@ const CONSTRAINTS = {
   aspectRatios: new Set([
     '1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9',
   ]),
-  nanoBanana2ImageSizes: new Set(['512', '1K', '2K']),
+  nanoBanana2ImageSizes: new Set(['1K', '512']),
   nanoBananaProImageSizes: new Set(['1K', '2K']),
 };
 
@@ -57,8 +56,8 @@ const REFERENCE_ROLES = new Set(['reference']);
 const ALLOWED_ROLES = new Set([...PRIMARY_ROLES, ...REFERENCE_ROLES]);
 
 // Environment variables passed through to the wrapper subprocess. Operational
-// values are always allowlisted. Service-account ADC is allowed only from a
-// trusted worker env that sets NATIVE_MEDIA_ALLOW_GOOGLE_APPLICATION_CREDENTIALS.
+// values are always allowlisted. Service-account ADC is allowed only from the
+// trusted worker env; the browser/client never controls this env.
 const ENV_ALLOWLIST = new Set([
   'PATH',
   'HOME',
@@ -98,8 +97,8 @@ function liveVertexEnabled() {
   return process.env.NATIVE_MEDIA_LIVE_VERTEX === '1';
 }
 
-// Build a minimal, credential-free environment for the wrapper subprocess.
-// Starts from an empty object and copies only allowlisted, non-denied keys.
+// Build a minimal environment for the wrapper subprocess. Starts from an empty
+// object and copies only allowlisted, non-denied keys.
 function buildEnv(baseEnv) {
   const env = {};
   const src = baseEnv && typeof baseEnv === 'object' ? baseEnv : process.env;
@@ -110,7 +109,6 @@ function buildEnv(baseEnv) {
     env[key] = String(value);
   }
   if (
-    src[GATED_GOOGLE_ADC_ALLOW_ENV] === '1' &&
     typeof src[GATED_GOOGLE_ADC_ENV] === 'string' &&
     src[GATED_GOOGLE_ADC_ENV]
   ) {
@@ -129,13 +127,14 @@ function parseMediaStdout(stdout) {
   return match ? match[1].trim() : null;
 }
 
-function redactProviderText(text, { prompt, outputPath } = {}) {
+function redactProviderText(text, { prompt, outputPath, credentialPath } = {}) {
   let out = String(text || '');
   if (prompt) out = out.split(String(prompt)).join('<prompt>');
   if (outputPath) out = out.split(String(outputPath)).join('<output>');
   out = out.split(REPO_ROOT).join('<repo>');
-  const creds = process.env.GOOGLE_APPLICATION_CREDENTIALS;
-  if (creds) out = out.split(String(creds)).join('<google-credentials>');
+  for (const creds of [process.env.GOOGLE_APPLICATION_CREDENTIALS, credentialPath]) {
+    if (creds) out = out.split(String(creds)).join('<google-credentials>');
+  }
   return out.slice(-4096);
 }
 
@@ -173,6 +172,9 @@ function buildVertexImageArgs(opts) {
     argv.push('--aspect-ratio', String(parameters.aspectRatio));
   }
   if (parameters.imageSize != null) {
+    if (opts.modelId === 'native.vertex.nano-banana-2' && String(parameters.imageSize) === '2K') {
+      throw new Error('Nano Banana 2 imageSize 2K is not supported');
+    }
     argv.push('--image-size', String(parameters.imageSize));
   }
 
@@ -363,7 +365,7 @@ async function runVertexImageProvider(job, clean, ctx, opts = {}) {
     resolveOutputPath: () => parseMediaStdout(stdout) || outputPath,
     settlePatch: (patch) => {
       if (!stderr || patch.status === 'completed') return null;
-      return { detail: redactProviderText(stderr, { prompt: clean.prompt, outputPath }) };
+      return { detail: redactProviderText(stderr, { prompt: clean.prompt, outputPath, credentialPath: env.GOOGLE_APPLICATION_CREDENTIALS }) };
     },
   });
 
