@@ -1,0 +1,97 @@
+{
+  "schema_version": "codex-preserve-v1",
+  "agent": "codex",
+  "session_metadata": {
+    "thread_id": "019f1a2e-6d94-7fe2-969d-2d0fe51f4042",
+    "thread_name": "OGAI-next-feature-planning",
+    "client_code": "OGAI",
+    "timestamp_ist": "2026-07-01 19:09 IST",
+    "cwd": "/home/k8r1m/Open-Generative-AI",
+    "project_root": "/home/k8r1m/Open-Generative-AI",
+    "rollout_path": "/home/k8r1m/.codex/sessions/2026/07/01/rollout-2026-07-01T01-47-58-019f1a2e-6d94-7fe2-969d-2d0fe51f4042.jsonl"
+  },
+  "completed_tasks": [
+    "Merged feat/native-grok-imagine-video back to main and pushed main to origin earlier in the session.",
+    "Restarted the intended systemd app stack: open-generative-ai.service on 127.0.0.1:19300 and open-generative-ai-native-worker.service on 127.0.0.1:19334.",
+    "Removed stale Tailscale 19400 exposure; verified only 19300 is exposed for Open Generative AI and 19400 is not listening.",
+    "Verified /studio on local 19300 and tailnet 19300 returned HTTP 200, native health returned ok, and library API returned 48 visible items with prompts and URLs.",
+    "Ran native test sweep on main; final rerun passed 232/232 tests. One earlier cancellation assertion failed once and passed in isolation plus full rerun.",
+    "Created feature-dev/README.md as the repo-local feature-development control folder README and updated AGENTS.md to require reading it before future feature planning/branching.",
+    "Updated /home/k8r1m/.codex/info-lookup-routing.md with a local pointer to /home/k8r1m/Open-Generative-AI/feature-dev/.",
+    "Created and pushed feature-dev/next-feature-inbox.md with Karim's requested next-round feature list.",
+    "Updated and pushed feature-dev/next-feature-inbox.md with Karim's clarified answers and Gemini Omni-first priority. Latest pushed commit is e868a23 Capture clarified next feature priorities."
+  ],
+  "current_state": [
+    "Current branch is main and is pushed to origin/main at commit e868a23.",
+    "The production/test app should remain on systemd 19300 until Karim asks to start the next feature branch on 19400.",
+    "The next feature round has not been planned or implemented. The inbox is a requirements record only.",
+    "Karim is testing Gemini Omni separately now and wants Gemini Omni native video provider added first when planning starts.",
+    "Two untracked handoff sidecar files remain in the repo: codex-handoffs/.turns-019f1962 and codex-handoffs/.turns-019f1a2e. They were intentionally not committed."
+  ],
+  "modified_files": [
+    "/home/k8r1m/Open-Generative-AI/AGENTS.md - added feature-dev startup rule.",
+    "/home/k8r1m/Open-Generative-AI/feature-dev/README.md - documents required future feature workflow.",
+    "/home/k8r1m/Open-Generative-AI/feature-dev/next-feature-inbox.md - records next-round feature requests, clarified answers, and priority.",
+    "/home/k8r1m/.codex/info-lookup-routing.md - local Codex routing pointer for Open Generative AI feature-dev tracking.",
+    "/home/k8r1m/Open-Generative-AI/codex-handoffs/OGAI-next-feature-planning-2026-07-01-1909-019f1a2e-codex-preserve.json - this preserve handoff."
+  ],
+  "constraints_to_preserve": [
+    "Karim: \"DO THINGS IN THE ORDER I TELL YOU\".",
+    "Karim: \"i DEFIFNELY ALSO want the use last frame button iimnplemented as well as the below FEATURE LIST for OGAI\".",
+    "Karim: \"i am testing omi now and i would want to add that FIRST then do the other phases\".",
+    "Karim wants the logo generated with image generation and used in the app; required source should be square 1:1, preferred 1024x1024 transparent PNG, readable at 32x32 in the current 56px header.",
+    "Karim wants add-to-prompt actions to append to existing prompt/input state with a space or line, not replace existing selections.",
+    "Karim wants generated videos added as prompt references only for the new Gemini Omni provider for now.",
+    "Karim wants output filename version counters to reset per prefix, but if reverting to an old prefix the app should continue from that prefix's last used version.",
+    "Karim wants delete warnings for uploads that are tagged in a Project or Reference, but no warning merely because an upload was used as a generation input.",
+    "Karim wants prompt templates as plain Markdown files for now.",
+    "Karim wants Uploads view to replace the generated images/videos in the center of the screen.",
+    "Karim wants References navigation as a cascading menu: References -> Characters/Locations/Props -> named collection -> open that page.",
+    "Future feature workflow in feature-dev/README.md must be followed: clarify requirements, refresh Graphify, trace code, trace local skills/scripts/libraries, read official docs, delegate research to subagents, plan in GPT-5.5 high or extra-high, audit via Multica with GLM 5.2 OpenCode and Gemini 3.5 Flash General, verify audit findings, then stop before execution until Karim confirms coding agents.",
+    "Default coding agents for execution are GPT-5.5 medium native executor subagents unless Karim chooses GLM 5.2 OpenCode or Composer 2.5 coding agents if available. GPT-5.5 high native code-reviewer agents should review before merge eligibility.",
+    "Do not break already-working native media paths while adding features. Verify Grok video, Nano Banana 2/Pro image, native Codex image, prompt copy, delete, history hydration, and existing .native-media assets before handing back for testing.",
+    "Do not serve fake provider results as successful user-facing generations.",
+    "Preserve NATIVE_MEDIA_ROOT and .native-media across branches/merges; do not clean or delete .native-media."
+  ],
+  "key_decisions_and_rationale": [
+    "Feature-dev context now lives under /home/k8r1m/Open-Generative-AI/feature-dev so future planning artifacts stay with the fork instead of being scattered through old docs/plans files.",
+    "The current next-feature file is an inbox, not a plan, because Karim has not yet switched the session into plan mode or confirmed coding agents for execution.",
+    "Logo source recommendation is 1:1 1024x1024 PNG because the current app header uses a 32x32 square logo container inside a 56px header, so a square source downscales cleanly without changing layout.",
+    "References/projects should avoid duplicate media copies where possible, using metadata/tags/collection records pointing at the single stored asset; this matches Karim's stated preference but still needs exact schema planning.",
+    "Gemini Omni provider should be planned first because Karim explicitly prioritized it and it may affect the multimodal native media input contract."
+  ],
+  "issues_discovered": [
+    "No new code issues were discovered in the docs-only feature inbox update.",
+    "During the earlier merge verification, one native scheduler cancellation test failed once in the full sweep, then passed in isolation and passed again in the full 232-test rerun. Treat as possible timing flake if it reappears.",
+    "Tailscale serve CLI required the corrected form tailscale serve --bg --tcp=19400 //127.0.0.1:19400 off to remove the stale 19400 TCP forward.",
+    "Gemini Omni official model/API name, exact supported modalities, and Vertex availability are not verified yet and must be researched before planning."
+  ],
+  "open_questions": [
+    "Exact Gemini Omni model/API name and official documentation are not yet verified.",
+    "Whether Gemini Omni is available through the current Vertex credentials/project is not yet verified.",
+    "Which uploaded media types Gemini Omni should accept in V1 must be determined from official docs and Karim's testing.",
+    "Whether output filename prefixes are global, per studio, per project, or per provider remains open.",
+    "Whether references/projects should be implemented as metadata/tags only or as lightweight collection records pointing at original assets remains open.",
+    "Whether every sidebar tab replaces generated history or only specific content pages such as Uploads and selected Reference/Project pages remains partially open."
+  ],
+  "next_steps": [
+    "When Karim is ready, start by reading /home/k8r1m/Open-Generative-AI/feature-dev/README.md and /home/k8r1m/Open-Generative-AI/feature-dev/next-feature-inbox.md.",
+    "Ask any remaining clarifying questions before planning, especially around Gemini Omni official API/model details if Karim has testing results.",
+    "Prompt Karim to put the session into plan mode for GPT-5.5 high or extra-high planning before making an implementation plan.",
+    "Create a new feature-round subfolder under /home/k8r1m/Open-Generative-AI/feature-dev/ for the Gemini Omni-first round before writing plan artifacts.",
+    "Refresh Graphify with graphify update . --force and use graphify query before narrow rg/sed/nl reads.",
+    "Delegate research to subagents: repo/code tracing, local scripts/skills/libraries tracing, official Gemini Omni/Vertex docs, and current app regression surface.",
+    "Compile research into the feature round folder, then make the plan.",
+    "Audit the plan adversarially with Multica GLM 5.2 OpenCode and Gemini 3.5 Flash General, optionally Grok 4.3, then verify findings before amending.",
+    "Before coding, confirm Karim's preferred coding agents for this run: GPT-5.5 medium native executors by default, or GLM 5.2 OpenCode / Composer 2.5 if available and chosen.",
+    "For execution later, host the feature branch on 19400 for testing and keep the systemd main app on 19300 as the stable baseline unless Karim says otherwise."
+  ],
+  "read_first": [
+    "/home/k8r1m/Open-Generative-AI/AGENTS.md",
+    "/home/k8r1m/Open-Generative-AI/feature-dev/README.md",
+    "/home/k8r1m/Open-Generative-AI/feature-dev/next-feature-inbox.md",
+    "/home/k8r1m/Open-Generative-AI/docs/plans/native-video-last-frame-download-plan.md",
+    "/home/k8r1m/Open-Generative-AI/docs/state/native-media-library-delete-copy-tests.md",
+    "/home/k8r1m/Open-Generative-AI/codex-handoffs/OGAI-next-feature-planning-2026-07-01-1909-019f1a2e-codex-preserve.json"
+  ]
+}
