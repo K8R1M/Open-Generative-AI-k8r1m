@@ -296,7 +296,7 @@ test('resolveInputAssets: rejects path traversal and missing assets', async () =
   );
 });
 
-test('buildEnv drops credentials unless worker ADC gate is set and argv never carries credential paths', () => {
+test('buildEnv forwards worker ADC without leaking other credentials and argv never carries credential paths', () => {
   const env = vertex.buildEnv({
     PATH: '/usr/bin',
     HOME: '/h',
@@ -309,8 +309,8 @@ test('buildEnv drops credentials unless worker ADC gate is set and argv never ca
   assert.equal(env.PATH, '/usr/bin');
   assert.equal(env.HOME, '/h');
   assert.equal(env.GOOGLE_CLOUD_PROJECT, 'proj-x');
-  assert.equal(env.GOOGLE_APPLICATION_CREDENTIALS, undefined);
-  assert.equal(env.NATIVE_MEDIA_ALLOW_GOOGLE_APPLICATION_CREDENTIALS, undefined);
+  assert.equal(env.GOOGLE_APPLICATION_CREDENTIALS, '/secret/sa.json');
+  assert.equal(env.NATIVE_MEDIA_ALLOW_GOOGLE_APPLICATION_CREDENTIALS, '1');
   assert.equal(env.GEMINI_API_KEY, undefined);
   assert.equal(env.RANDOM_BAD, undefined);
 
@@ -328,7 +328,7 @@ test('buildEnv drops credentials unless worker ADC gate is set and argv never ca
   assert.ok(!/GOOGLE_APPLICATION_CREDENTIALS|\.json/i.test(joined));
 });
 
-test('buildEnv passes service-account ADC only when the trusted worker gate is set', () => {
+test('buildEnv preserves explicit worker ADC allow marker when present', () => {
   const env = vertex.buildEnv({
     PATH: '/usr/bin',
     GOOGLE_CLOUD_PROJECT: 'proj-x',
@@ -372,7 +372,7 @@ test('live runner uses fixed python + script paths with shell:false', async () =
   assert.equal(captured.opts.env.PATH, '/bin');
 });
 
-test('live runner forwards gated worker service-account ADC env to the wrapper child', async () => {
+test('live runner forwards gateway service-account ADC env to the wrapper child', async () => {
   let captured;
   const spawnProbe = (cmd, argv, opts) => {
     captured = { cmd, argv, opts };
@@ -394,13 +394,49 @@ test('live runner forwards gated worker service-account ADC env to the wrapper c
         PATH: '/bin',
         GOOGLE_CLOUD_PROJECT: 'proj-x',
         GOOGLE_APPLICATION_CREDENTIALS: '/service/accounts/native.json',
-        NATIVE_MEDIA_ALLOW_GOOGLE_APPLICATION_CREDENTIALS: '1',
       },
     }
   );
   assert.equal(captured.opts.env.GOOGLE_APPLICATION_CREDENTIALS, '/service/accounts/native.json');
   assert.equal(captured.opts.env.NATIVE_MEDIA_ALLOW_GOOGLE_APPLICATION_CREDENTIALS, '1');
   assert.equal(captured.opts.env.GOOGLE_CLOUD_PROJECT, 'proj-x');
+});
+
+test('runVertexVideoProvider redacts child env ADC path from failure detail', async () => {
+  const rid = 'c6-stderr-adc-' + Date.now();
+  const credentialPath = '/service/accounts/native.json';
+  const settled = [];
+  const ctx = {
+    scheduler,
+    tmpDir: path.join(TEST_ROOT, 'tmp'),
+    getAsset: gateway.getAsset,
+    register: (child, meta) =>
+      scheduler.registerSubprocess(rid, {
+        child,
+        provider: 'vertex',
+        outputPath: meta.outputPath,
+        expectedMime: meta.expectedMime,
+        timeoutMs: meta.timeoutMs,
+        resolveOutputPath: meta.resolveOutputPath,
+        settlePatch: meta.settlePatch,
+        onSettle: async (id, patch) => settled.push(patch),
+        onRelease: () => scheduler.releaseSlot('vertex', id),
+        onDrain: () => {},
+      }),
+  };
+  await vertex.runVertexVideoProvider(
+    { id: rid },
+    { modelId: 'native.vertex.veo-3.1-fast', task: 'text-to-video', prompt: 'p', parameters: { durationSeconds: 4 }, inputs: [] },
+    ctx,
+    {
+      spawn: fakeSpawn({ writeMp4: false, exitCode: 1, delayMs: 15, stderrText: `Vertex video error: ${credentialPath}` }),
+      env: { GOOGLE_APPLICATION_CREDENTIALS: credentialPath },
+    }
+  );
+  await waitFor(() => settled.length > 0, { timeoutMs: 2000 });
+  assert.equal(settled[0].status, 'INTERRUPTED_PROCESS');
+  assert.doesNotMatch(settled[0].detail, new RegExp(credentialPath));
+  assert.match(settled[0].detail, /<google-credentials>/);
 });
 
 test('default video wrapper paths are repo-local', () => {

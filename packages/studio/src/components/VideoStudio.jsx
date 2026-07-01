@@ -24,7 +24,7 @@ import {
   isNativeModelId,
   nativeModelById,
 } from "../nativeModels.js";
-import { deleteNativeLibraryItem, generateNativeMedia, listNativeLibrary, uploadNativeFile } from "../nativeMedia.js";
+import { copyPromptToClipboard, deleteNativeLibraryItem, generateNativeMedia, listNativeLibrary, uploadNativeFile } from "../nativeMedia.js";
 
 // ── tiny helpers ──────────────────────────────────────────────────────────────
 
@@ -188,23 +188,6 @@ async function downloadFile(url, filename) {
   }
 }
 
-async function copyPromptToClipboard(text) {
-  const value = text || "";
-  try {
-    await navigator.clipboard.writeText(value);
-    return;
-  } catch {}
-  const textarea = document.createElement("textarea");
-  textarea.value = value;
-  textarea.setAttribute("readonly", "");
-  textarea.style.position = "fixed";
-  textarea.style.left = "-9999px";
-  document.body.appendChild(textarea);
-  textarea.select();
-  document.execCommand("copy");
-  document.body.removeChild(textarea);
-}
-
 function normalizeServerHistoryEntry(item) {
   const url = item?.url || item?.outputs?.[0];
   if (!url) return null;
@@ -234,12 +217,15 @@ function sameHistoryEntry(a, b) {
 
 function mergeServerHistory(local, server) {
   const seen = new Set();
+  const serverKeys = new Set();
   const out = [];
   for (const entry of server.map(normalizeServerHistoryEntry).filter(Boolean)) {
     historyKeys(entry).forEach((key) => seen.add(key));
+    historyKeys(entry).forEach((key) => serverKeys.add(key));
     out.push(entry);
   }
   for (const entry of local || []) {
+    if (entry?.serverBacked && entry?.native && !historyKeys(entry).some((key) => serverKeys.has(key))) continue;
     if (historyKeys(entry).some((key) => seen.has(key))) continue;
     historyKeys(entry).forEach((key) => seen.add(key));
     out.push(entry);

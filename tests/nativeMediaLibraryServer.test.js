@@ -18,7 +18,7 @@ const PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMB/axl56QAAAAASUVORK5CYII=',
   'base64'
 );
-const MP4 = Buffer.from('00000018667479706d703432000000006d70343269736f6d000000086d646174', 'hex');
+const MP4 = Buffer.from('000000206674797069736f6d0000020069736f6d69736f32617663316d703431000003176d6f6f76d6f6f760000086d646174', 'hex');
 
 async function invoke(method, url) {
   const req = new EventEmitter();
@@ -123,12 +123,14 @@ test('native library lists completed assets, filters kind, paginates with jobId 
   const second = await invoke('GET', `/api/native-media/v1/library?kind=image&limit=10&cursor=${encodeURIComponent(first.body.nextCursor)}`);
   assert.equal(second.status, 200);
   assert.deepEqual(second.body.items.map((i) => i.jobId), ['job-a']);
+  assert.equal(second.body.items[0].prompt, 'prompt job-a');
   assert.equal(JSON.stringify(second.body).includes('outputPath'), false);
   assert.equal(JSON.stringify(second.body).includes('codexDiagnostics'), false);
 
   const videos = await invoke('GET', '/api/native-media/v1/library?kind=video&limit=10');
   assert.equal(videos.status, 200);
   assert.deepEqual(videos.body.items.map((i) => i.jobId), ['job-c']);
+  assert.equal(videos.body.items[0].prompt, 'prompt job-c');
 });
 
 test('native library delete is jobId-only, tombstones before rm, tolerates missing assets, and rejects path tricks', async () => {

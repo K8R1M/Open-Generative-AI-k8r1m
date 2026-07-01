@@ -57,11 +57,119 @@ test('native library client lists by kind/limit and deletes by jobId only', asyn
   await withBrowser(fetchImpl, () => impl.deleteNativeLibraryItem('job-1'));
 
   assert.equal(items.length, 1);
+  assert.equal(items[0].prompt, 'copy me');
   assert.equal(calls[0].url, '/api/native-media/v1/library?kind=image&limit=2');
   assert.equal(calls[0].opts.headers.Accept, 'application/json');
   assert.equal(calls[1].url, '/api/native-media/v1/library/job-1');
   assert.equal(calls[1].opts.method, 'DELETE');
   assert.ok(!calls[1].url.includes('asset-1'), 'client delete must not key requests by assetId');
+});
+
+test('native image success without URL or asset is rejected and cannot be stored', async () => {
+  const impl = await loadNative('packages/studio/src/nativeMedia.js', 'native fake image success client');
+  const fetchImpl = async () => response({
+    id: 'job-empty',
+    status: 'completed',
+    model: 'native.vertex.nano-banana-2',
+    outputs: [],
+  });
+
+  await assert.rejects(
+    () =>
+      withBrowser(fetchImpl, () =>
+        impl.generateNativeMedia({
+          modelId: 'native.vertex.nano-banana-2',
+          task: 'text-to-image',
+          prompt: 'blank card regression',
+          clientRequestId: 'req-empty',
+        })
+      ),
+    /ASSET_UNAVAILABLE|no same-origin asset URL/i
+  );
+
+  const source = fs.readFileSync(path.join(process.cwd(), 'packages/studio/src/components/ImageStudio.jsx'), 'utf8');
+  assert.ok(source.includes('function isUsableGeneratedImageResult(res)'), 'ImageStudio must gate history inserts through a usable-result check');
+  assert.ok(source.includes('if (isUsableGeneratedImageResult(res))'), 'ImageStudio must not store native results merely because an object returned');
+  assert.ok(source.includes('isSameOriginAssetUrl(res.url)'), 'native image history entries must require a same-origin asset URL');
+  assert.ok(source.includes('!res.error'), 'native image history entries must reject reported errors');
+  assert.ok(source.includes('status.includes("unavailable")'), 'native image history entries must reject unavailable statuses');
+});
+
+test('native image non-2xx generation rejects before ImageStudio can add history', async () => {
+  const impl = await loadNative('packages/studio/src/nativeMedia.js', 'native non-2xx image client');
+  const fetchImpl = async () => response({ error: 'provider down' }, false);
+
+  await assert.rejects(
+    () =>
+      withBrowser(fetchImpl, () =>
+        impl.generateNativeMedia({
+          modelId: 'native.codex.gpt-image-2',
+          task: 'text-to-image',
+          prompt: 'do not store',
+          clientRequestId: 'req-500',
+        })
+      ),
+    /Native generation failed: 500 ERR/
+  );
+
+  const source = fs.readFileSync(path.join(process.cwd(), 'packages/studio/src/components/ImageStudio.jsx'), 'utf8');
+  assert.ok(
+    /try\s*{[\s\S]*generateNativeMedia\([\s\S]*results\.forEach[\s\S]*}\s*catch\s*\(e\)\s*{[\s\S]*setGenerateError/.test(source),
+    'ImageStudio must keep native generation failures on the error path instead of adding history'
+  );
+});
+
+test('native prompt copy uses exact text with textarea fallback and reports failure', async () => {
+  const impl = await loadNative('packages/studio/src/nativeMedia.js', 'native prompt copy client');
+  const oldNavigator = global.navigator;
+  const oldDocument = global.document;
+  const oldAlert = global.alert;
+  const nodes = [];
+  let copiedValue = null;
+  let alertText = null;
+
+  Object.defineProperty(global, 'navigator', {
+    configurable: true,
+    value: { clipboard: { writeText: async () => { throw new Error('insecure'); } } },
+  });
+  global.document = {
+    body: {
+      appendChild(node) {
+        nodes.push(node);
+      },
+      removeChild() {},
+    },
+    createElement() {
+      return {
+        value: '',
+        style: {},
+        setAttribute() {},
+        select() {
+          copiedValue = this.value;
+        },
+      };
+    },
+    execCommand() {
+      return true;
+    },
+  };
+
+  try {
+    assert.equal(await impl.copyPromptToClipboard('exact prompt'), true);
+    assert.equal(copiedValue, 'exact prompt');
+
+    global.document.execCommand = () => false;
+    global.alert = (text) => {
+      alertText = text;
+    };
+    assert.equal(await impl.copyPromptToClipboard('still exact'), false);
+    assert.match(alertText, /Copy failed/);
+    assert.ok(nodes.length >= 2);
+  } finally {
+    Object.defineProperty(global, 'navigator', { configurable: true, value: oldNavigator });
+    global.document = oldDocument;
+    global.alert = oldAlert;
+  }
 });
 
 const STUDIO_STATIC_CASES = [
@@ -90,7 +198,8 @@ for (const { name, file, kind, failureLog } of STUDIO_STATIC_CASES) {
     );
     assert.ok(count('mergeServerHistory(') > 1, `${name} server hydration must de-dupe against local history`);
     assert.ok(/listNativeLibrary\([^)]*\)[\s\S]*\.catch\(/.test(source), 'server-down library load must fall back to local history');
-    assert.ok(count('copyPromptToClipboard(') > 1, `${name} history cards must expose prompt copy`);
+    assert.ok(source.includes('copyPromptToClipboard(entry.prompt);'), `${name} history cards must copy exact prompt text`);
+    assert.ok(source.includes('prompt: item.prompt || ""'), `${name} server history mapping must preserve prompt`);
     assert.ok(
       source.includes('confirm("Delete this generation from the interface and server? This cannot be undone.")'),
       `${name} native server delete must require the accepted confirmation text`
@@ -105,3 +214,15 @@ for (const { name, file, kind, failureLog } of STUDIO_STATIC_CASES) {
     assert.ok(/serverBacked/.test(source), `${name} must distinguish server-backed from local-only entries`);
   });
 }
+
+test('VideoStudio prunes stale native server-backed local video entries only after server hydration succeeds', () => {
+  const source = fs.readFileSync(path.join(process.cwd(), 'packages/studio/src/components/VideoStudio.jsx'), 'utf8');
+  assert.ok(
+    /entry\?\.serverBacked && entry\?\.native && !historyKeys\(entry\)\.some\(\(key\) => serverKeys\.has\(key\)\)/.test(source),
+    'VideoStudio must prune stale native server-backed local entries missing from server library'
+  );
+  assert.ok(
+    /listNativeLibrary\(\{ kind: "video", limit: 50 \}\)[\s\S]*\.then\(\(items\) => setLocalHistory/.test(source),
+    'VideoStudio pruning must happen only on successful server library hydration'
+  );
+});

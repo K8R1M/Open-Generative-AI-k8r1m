@@ -10,6 +10,7 @@ delete process.env.NATIVE_MEDIA_LIVE_VERTEX;
 delete process.env.NATIVE_MEDIA_LIVE_CODEX;
 delete process.env.NATIVE_MEDIA_LIVE_GROK;
 
+const gateway = require('../native-media-gateway/exports.js');
 const { createServer, publicJob } = require('../native-media-gateway/server.js');
 
 function listen(server) {
@@ -18,7 +19,7 @@ function listen(server) {
   });
 }
 
-test('native gateway loopback server exposes public generation responses only', async (t) => {
+test('native gateway loopback server rejects unavailable image providers without creating fake success', async (t) => {
   const server = createServer();
   const port = await listen(server);
   t.after(async () => {
@@ -40,11 +41,13 @@ test('native gateway loopback server exposes public generation responses only', 
       prompt: 'loopback fake only',
     }),
   });
-  assert.equal(res.status, 201);
+  assert.equal(res.status, 503);
   const job = await res.json();
-  assert.equal(job.status, 'completed');
-  assert.match(job.url, /^\/api\/native-media\/v1\/assets\//);
-  for (const field of ['outputPath', 'detail', 'pid', 'pgid', 'subprocessProvider', 'providerConfig', 'prompt']) {
+  assert.equal(job.error, 'REAL_PROVIDER_UNAVAILABLE');
+  assert.match(job.message, /provider unavailable/i);
+  assert.equal(job.status, undefined);
+  assert.equal(job.url, undefined);
+  for (const field of ['outputPath', 'detail', 'pid', 'pgid', 'subprocessProvider', 'providerConfig']) {
     assert.equal(Object.hasOwn(job, field), false, `${field} must not be public`);
   }
 });
@@ -149,18 +152,11 @@ test('native gateway support for range and suffix range requests', async (t) => 
 
   const base = `http://127.0.0.1:${port}`;
 
-  // Submit a generation to create an asset
-  const res = await fetch(`${base}/api/native-media/v1/generations`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      modelId: 'native.vertex.nano-banana-2',
-      task: 'text-to-image',
-      prompt: 'range testing asset',
-    }),
+  const job = await gateway.submitGeneration({
+    modelId: 'native.vertex.nano-banana-2',
+    task: 'text-to-image',
+    prompt: 'range testing asset',
   });
-  assert.equal(res.status, 201);
-  const job = await res.json();
   assert.equal(job.status, 'completed');
   const assetUrl = `${base}${job.url}`;
 
@@ -242,18 +238,11 @@ test('native gateway handles stale or missing files safely without crash', async
 
   const base = `http://127.0.0.1:${port}`;
 
-  // Submit a generation to create an asset
-  const res = await fetch(`${base}/api/native-media/v1/generations`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      modelId: 'native.vertex.nano-banana-2',
-      task: 'text-to-image',
-      prompt: 'volatile asset',
-    }),
+  const job = await gateway.submitGeneration({
+    modelId: 'native.vertex.nano-banana-2',
+    task: 'text-to-image',
+    prompt: 'volatile asset',
   });
-  assert.equal(res.status, 201);
-  const job = await res.json();
   const assetUrl = `${base}${job.url}`;
 
   // Verify full asset is 200 first

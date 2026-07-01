@@ -20,7 +20,7 @@ const PNG_1X1 = Buffer.from(
   'base64'
 );
 
-async function request(method, url) {
+async function request(method, url, body) {
   const req = new EventEmitter();
   req.method = method;
   req.url = url;
@@ -42,7 +42,10 @@ async function request(method, url) {
     res.resolve = resolve;
   });
   handleNativeRequest(req, res);
-  process.nextTick(() => req.emit('end'));
+  process.nextTick(() => {
+    if (body !== undefined) req.emit('data', Buffer.from(typeof body === 'string' ? body : JSON.stringify(body)));
+    req.emit('end');
+  });
   await done;
   return { status: res.statusCode, body: res.body ? JSON.parse(res.body) : null };
 }
@@ -66,17 +69,88 @@ test('library route lists completed generated assets newest first without privat
   });
   const oldAsset = await gateway.getAsset(oldJob.assetId);
   await fsp.rm(oldAsset.path, { force: true });
+  const newAsset = await gateway.getAsset(newJob.assetId);
+  const newAssetBytes = await fsp.readFile(newAsset.path);
+  assert.ok(newAssetBytes.includes(Buffer.from('moov')), 'fake video MP4 must include moov metadata');
 
   const res = await request('GET', '/api/native-media/v1/library?kind=all&limit=100');
   assert.equal(res.status, 200);
   assert.deepEqual(res.body.items.map((job) => job.id), [newJob.id]);
   assert.equal(res.body.nextCursor, null);
-  assert.equal(res.body.items[0].prompt, undefined);
+  assert.equal(res.body.items[0].prompt, 'new');
   assert.equal(res.body.items[0].providerConfig, undefined);
   assert.equal(res.body.items[0].asset.assetId, newJob.assetId);
 
   const videos = await request('GET', '/api/native-media/v1/library?kind=video');
   assert.deepEqual(videos.body.items.map((job) => job.id), [newJob.id]);
+});
+
+test('POST generations keeps Grok live without fake-completing unavailable image providers', async () => {
+  process.env.NATIVE_MEDIA_LIVE_GROK = '1';
+  const originalRunGrok = gateway.grokVideoProvider.runGrokVideoProvider;
+  let ranGrok = false;
+  try {
+    const vertex = await request('POST', '/api/native-media/v1/generations', {
+      modelId: 'native.vertex.nano-banana-2',
+      task: 'text-to-image',
+      prompt: 'vertex should not fake complete',
+      clientRequestId: 'server-vertex-fake-' + Date.now(),
+    });
+    assert.equal(vertex.status, 503);
+    assert.equal(vertex.body.error, 'REAL_PROVIDER_UNAVAILABLE');
+    assert.equal(vertex.body.status, undefined);
+    assert.equal(vertex.body.url, undefined);
+
+    const codex = await request('POST', '/api/native-media/v1/generations', {
+      modelId: 'native.codex.gpt-image-2',
+      task: 'text-to-image',
+      prompt: 'codex should not fake complete',
+      clientRequestId: 'server-codex-fake-' + Date.now(),
+    });
+    assert.equal(codex.status, 503);
+    assert.equal(codex.body.error, 'REAL_PROVIDER_UNAVAILABLE');
+    assert.equal(codex.body.status, undefined);
+    assert.equal(codex.body.url, undefined);
+
+    gateway.grokVideoProvider.runGrokVideoProvider = async (_job, _clean, api) => {
+      ranGrok = true;
+      const child = new EventEmitter();
+      child.pid = 987654321;
+      child.kill = () => false;
+      api.register(child, {
+        outputPath: path.join(TEST_ROOT, 'tmp', 'fake-grok-output.mp4'),
+        expectedMime: 'video/mp4',
+        timeoutMs: 1000,
+      });
+      return { child, outputPath: path.join(TEST_ROOT, 'tmp', 'fake-grok-output.mp4'), expectedMime: 'video/mp4' };
+    };
+    const upload = await gateway.uploadAsset({ bytes: PNG_1X1, mime: 'image/png' });
+    const grok = await request('POST', '/api/native-media/v1/generations', {
+      modelId: 'native.grok.imagine-video',
+      task: 'image-to-video',
+      prompt: 'grok should be live',
+      parameters: { durationSeconds: 6, resolution: '480p' },
+      inputs: [{ kind: 'asset', assetId: upload.assetId, role: 'first-frame' }],
+      clientRequestId: 'server-grok-live-' + Date.now(),
+    });
+    assert.equal(grok.status, 201);
+    assert.equal(grok.body.status, 'running');
+    assert.equal(ranGrok, true);
+    assert.equal((await gateway.getGeneration(grok.body.id)).subprocessProvider, 'grok');
+  } finally {
+    gateway.grokVideoProvider.runGrokVideoProvider = originalRunGrok;
+    delete process.env.NATIVE_MEDIA_LIVE_GROK;
+  }
+});
+
+test('POST generations returns bad request for null or malformed bodies', async () => {
+  const empty = await request('POST', '/api/native-media/v1/generations', null);
+  assert.equal(empty.status, 400);
+  assert.equal(empty.body.error, 'BAD_REQUEST');
+
+  const malformed = await request('POST', '/api/native-media/v1/generations', '{');
+  assert.equal(malformed.status, 400);
+  assert.equal(malformed.body.error, 'BAD_REQUEST');
 });
 
 test('library delete tombstones job and removes only generated asset', async () => {

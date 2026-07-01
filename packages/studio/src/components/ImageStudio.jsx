@@ -23,8 +23,10 @@ import {
   nativeModelById,
 } from "../nativeModels.js";
 import {
+  copyPromptToClipboard,
   deleteNativeLibraryItem,
   generateNativeMedia,
+  isSameOriginAssetUrl,
   listNativeLibrary,
   uploadNativeFile,
 } from "../nativeMedia.js";
@@ -185,23 +187,6 @@ async function downloadImage(url, filename) {
   }
 }
 
-async function copyPromptToClipboard(text) {
-  const value = text || "";
-  try {
-    await navigator.clipboard.writeText(value);
-    return;
-  } catch {}
-  const textarea = document.createElement("textarea");
-  textarea.value = value;
-  textarea.setAttribute("readonly", "");
-  textarea.style.position = "fixed";
-  textarea.style.left = "-9999px";
-  document.body.appendChild(textarea);
-  textarea.select();
-  document.execCommand("copy");
-  document.body.removeChild(textarea);
-}
-
 function normalizeServerHistoryEntry(item) {
   const url = item?.url || item?.outputs?.[0];
   if (!url) return null;
@@ -239,6 +224,22 @@ function mergeServerHistory(local, server) {
     out.push(entry);
   }
   return out.slice(0, 50);
+}
+
+const UNUSABLE_NATIVE_IMAGE_STATUSES = new Set([
+  "failed",
+  "cancelled",
+  "interrupted_process",
+  "outcome_unknown",
+  "asset_unavailable",
+  "unavailable",
+]);
+
+function isUsableGeneratedImageResult(res) {
+  if (!res?.url) return false;
+  if (!res.native) return true;
+  const status = String(res.status || "completed").toLowerCase();
+  return !res.error && !UNUSABLE_NATIVE_IMAGE_STATUSES.has(status) && !status.includes("unavailable") && isSameOriginAssetUrl(res.url);
 }
 
 // ─── UploadButton (inline picker) ───────────────────────────────────────────
@@ -1442,7 +1443,7 @@ export default function ImageStudio({
       );
 
       results.forEach((res) => {
-        if (res && res.url) {
+        if (isUsableGeneratedImageResult(res)) {
           const entry = {
             id: res.id || Math.random().toString(36).substring(7),
             jobId: res.native ? (res.request_id || res.id) : undefined,

@@ -1,0 +1,116 @@
+{
+  "schema_version": "codex-preserve-v1",
+  "agent": "codex",
+  "session_metadata": {
+    "thread_id": "019f1a2e-6d94-7fe2-969d-2d0fe51f4042",
+    "thread_name": "Open-Generative-AI",
+    "client_code": "Open",
+    "timestamp_ist": "2026-07-01 13:05 IST",
+    "cwd": "/home/k8r1m/Open-Generative-AI",
+    "project_root": "/home/k8r1m/Open-Generative-AI",
+    "rollout_path": "/home/k8r1m/.codex/sessions/2026/07/01/rollout-2026-07-01T01-47-58-019f1a2e-6d94-7fe2-969d-2d0fe51f4042.jsonl"
+  },
+  "completed_tasks": [
+    "Implemented native media library GET/DELETE routes and Studio hydration/copy/delete actions on branch feat/native-grok-imagine-video.",
+    "Implemented model-control updates: Nano Banana 2 2K removed/rejected, Nano Banana Pro keeps 1K/2K, native Codex GPT Image 2 size helper/prompt guidance added.",
+    "Fixed fake blank image success regression: server no longer fake-completes unavailable native image providers, and ImageStudio rejects native completed responses without a usable same-origin asset URL.",
+    "Fixed historical prompt regression: library responses now expose prompt while redacting private provider/runtime fields, so prompt display/copy works for server-hydrated entries.",
+    "Fixed broken historical video localStorage issue by pruning stale server-backed native video entries after successful server hydration.",
+    "Fixed fake MP4 placeholder issue by replacing the malformed fake MP4 stub with a playable stub containing moov metadata.",
+    "Fixed Vertex/Nano Banana ADC regression: trusted gateway GOOGLE_APPLICATION_CREDENTIALS now reaches Vertex image/video workers, and child-env credential paths are redacted from failure detail.",
+    "Fixed native media root drift: default NATIVE_MEDIA_ROOT is now repo-local /home/k8r1m/Open-Generative-AI/.native-media instead of process.cwd()/.native-media; explicit NATIVE_MEDIA_ROOT still wins.",
+    "Added root AGENTS.md with durable project rules to preserve existing native media paths, avoid fake provider successes, preserve Vertex ADC env, and share/merge .native-media stores across clones/worktrees/forks.",
+    "Updated docs/state/native-media-library-delete-copy-tests.md with current state, runtime, verification, known open scheduler test issue, and merge/new-branch rules.",
+    "Added docs/plans/native-media-regression-fix-plan.md and docs/plans/native-video-last-frame-download-plan.md; README references were updated.",
+    "Backed up feature branch earlier to origin/feat/native-grok-imagine-video at commit 364ecae before later uncommitted regression/root fixes. Current additional fixes are still uncommitted."
+  ],
+  "current_state": [
+    "Karim is still testing the running app and may either request more changes next session or approve merging this branch to main and starting new feature work in a fresh branch.",
+    "The app is currently running on 19400 and gateway on 19335. Do not restart while Karim is testing unless he explicitly says testing is complete or asks for a restart.",
+    "Gateway runtime was launched with NATIVE_MEDIA_ROOT=/home/k8r1m/Open-Generative-AI/.native-media plus live Grok/Vertex/Codex gates and ADC forwarding. The code-level root fix will apply on next restart; current runtime is already safe because explicit NATIVE_MEDIA_ROOT is set.",
+    "Current library API recently returned 46 visible items with no pagination. Deleted/tombstoned items are intentionally omitted and generated asset dirs are removed by server delete.",
+    "Worktree is dirty with feature fixes and generated graph refresh. Do not revert unrelated/user changes. Do not delete .native-media.",
+    "Full native test sweep currently has one known failure in tests/nativeSchedulerRecovery.test.js:101; targeted gateway/client/Vertex/root tests pass."
+  ],
+  "modified_files": [
+    "/home/k8r1m/Open-Generative-AI/AGENTS.md - new project instructions for preserving native media behavior and library root.",
+    "/home/k8r1m/Open-Generative-AI/docs/state/native-media-library-delete-copy-tests.md - refreshed session state and next steps.",
+    "/home/k8r1m/Open-Generative-AI/docs/plans/README.md - references new native regression/last-frame plans.",
+    "/home/k8r1m/Open-Generative-AI/docs/plans/native-media-regression-fix-plan.md - regression plan/audit notes for provider failures, prompts, stale videos, fake completions.",
+    "/home/k8r1m/Open-Generative-AI/docs/plans/native-video-last-frame-download-plan.md - plan for ffmpeg last-frame download feature.",
+    "/home/k8r1m/Open-Generative-AI/native-media-gateway/exports.js - library/delete behavior, playable fake MP4, provider/root changes, root test export.",
+    "/home/k8r1m/Open-Generative-AI/native-media-gateway/server.js - public prompt exposure, provider-specific live/fake selection, safe error mapping, 204 delete.",
+    "/home/k8r1m/Open-Generative-AI/native-media-gateway/vertexImageProvider.js - trusted ADC forwarding and child-env path redaction.",
+    "/home/k8r1m/Open-Generative-AI/native-media-gateway/vertexVideoProvider.js - trusted ADC forwarding and child-env path redaction.",
+    "/home/k8r1m/Open-Generative-AI/packages/studio/src/nativeMedia.js - shared prompt copy helper, unavailable terminal status, completed result URL validation.",
+    "/home/k8r1m/Open-Generative-AI/packages/studio/src/components/ImageStudio.jsx - server library hydration/copy/delete and native usable-result guard.",
+    "/home/k8r1m/Open-Generative-AI/packages/studio/src/components/VideoStudio.jsx - server library hydration/copy/delete and stale server-backed pruning.",
+    "/home/k8r1m/Open-Generative-AI/tests/nativeGatewayLibrary.test.js - library prompt/delete/provider-fake regression coverage.",
+    "/home/k8r1m/Open-Generative-AI/tests/nativeGatewayServer.test.js - loopback gateway rejection/range/missing asset tests updated.",
+    "/home/k8r1m/Open-Generative-AI/tests/nativeMediaLibraryClient.test.js - client hydration/copy/fake-card regression coverage.",
+    "/home/k8r1m/Open-Generative-AI/tests/nativeMediaLibraryServer.test.js - library server contract tests.",
+    "/home/k8r1m/Open-Generative-AI/tests/nativeRouteVersioning.test.js - provider-specific live-gate contract updates.",
+    "/home/k8r1m/Open-Generative-AI/tests/nativeVertexImageProvider.test.js - ADC forwarding/redaction tests.",
+    "/home/k8r1m/Open-Generative-AI/tests/nativeVertexVideoProvider.test.js - ADC forwarding/redaction tests.",
+    "/home/k8r1m/Open-Generative-AI/tests/nativeStoreRoot.test.js - repo-relative root and explicit override tests.",
+    "/home/k8r1m/Open-Generative-AI/graphify-out/graph.json - refreshed after code changes.",
+    "/home/k8r1m/Open-Generative-AI/codex-handoffs/.turns-019f1962 - pre-existing untracked preserve sidecar from earlier compaction context; do not assume it is part of this handoff."
+  ],
+  "constraints_to_preserve": [
+    "Karim: 'you should not implement you orchestrate'.",
+    "Karim: 'NO i want MEDIUM IMPLEMENTATION AGENTS NOT HIGH'.",
+    "Karim: 'i said that 10 times already use gpt 5,.5 MEDIUM sub agents for codiung - YOU as the orchestrator can be on high and so can the code reviewers'.",
+    "Karim: when adding features, do not disable or break previously working features and then hand the app back for testing.",
+    "Karim is still testing now; do not restart the server or change behavior until he says testing is done or explicitly asks for changes/restart.",
+    "Future feature work must verify adjacent already-working native paths: Grok video, Nano Banana 2/Pro image, native Codex image, prompt copy, delete, history hydration, and existing .native-media assets.",
+    "Never serve fake provider output as a successful user-facing generation. If a real provider is unavailable, fail visibly and do not add a gallery card.",
+    "Preserve .native-media. Do not run clean commands that remove ignored .native-media. Deleted library items should be actually removed from server generated assets and omitted via tombstone.",
+    "Use one shared NATIVE_MEDIA_ROOT across separate clones/worktrees/forks, or explicitly merge their .native-media/jobs.json, assets, and uploads before switching back. Git will not merge ignored media stores.",
+    "Use Graphify before code navigation, then narrow rg/sed/nl reads. Refresh Graphify after meaningful code changes.",
+    "Ponytail mode full is active: minimal root-cause fixes, no new deps, no speculative abstractions, runnable checks for nontrivial logic."
+  ],
+  "key_decisions_and_rationale": [
+    "Defaulting native media root to repo-relative .native-media was chosen over process.cwd() because cwd drift caused empty-library risk across branch/startup contexts. Explicit NATIVE_MEDIA_ROOT still exists for shared stores across separate clones/worktrees.",
+    "Provider-specific live gates were chosen over global fake/live selection because enabling Grok live must not make Vertex/Codex image requests fake-complete as blank successful assets.",
+    "Client-side rejection of completed native image responses without same-origin asset URLs was added as a second guard, not a substitute for the server fix.",
+    "Prompt is no longer private in library responses because prompt display/copy is an explicit user-facing library feature; provider internals remain redacted.",
+    "Vertex ADC is forwarded from the trusted gateway process rather than browser/client input. Credential values/paths remain denied from request bodies, argv, public jobs, and failure detail.",
+    "The app was restarted only when Karim asked or when necessary to load approved fixes; current instruction is not to restart while testing continues.",
+    "Full native sweep failure in scheduler idempotency was recorded but not patched because Karim asked not to change anything else until after testing."
+  ],
+  "issues_discovered": [
+    "Bad hosted test instance previously used fake provider path and returned blank successful image assets for native Nano Banana/Codex. Fixed and reviewed.",
+    "Historical prompts were missing because prompt was listed as a private job field. Fixed and reviewed.",
+    "Some historical videos were stale localStorage/server-backed entries or fake MP4s without playable moov metadata. Server hydration/pruning and MP4 stub fixed.",
+    "Vertex/Nano Banana auth broke after restart because GOOGLE_APPLICATION_CREDENTIALS was present but NATIVE_MEDIA_ALLOW_GOOGLE_APPLICATION_CREDENTIALS was absent, causing the child env to strip ADC. Runtime workaround and code fix applied/reviewed.",
+    "Reviewer found ADC path could leak into provider failure detail when supplied via child env. Fixed with child-env redaction tests and approved.",
+    "Full native sweep still fails at tests/nativeSchedulerRecovery.test.js:101: duplicate clientRequestId idempotency lookup happens after validating changed duplicate inputs. Unresolved by request.",
+    "Current branch contains uncommitted fixes beyond pushed commit 364ecae. Do not assume origin branch includes all current work until committed/pushed."
+  ],
+  "open_questions": [
+    "Will Karim request more fixes after completing testing on 19400, or approve merge to main and start new feature work from a new branch?",
+    "Should the scheduler idempotency regression at tests/nativeSchedulerRecovery.test.js:101 be fixed before merge? It likely should, but wait until Karim finishes testing or explicitly asks.",
+    "Should current uncommitted fixes be committed and pushed as another backup before merge? Karim previously wanted backup to GitHub; latest fixes are not yet committed."
+  ],
+  "next_steps": [
+    "Wait for Karim's testing result. Do not restart 19400/19335 or edit behavior until he says testing is done or asks for a specific fix.",
+    "If Karim reports a regression, investigate read-only first, then delegate implementation to GPT-5.5 medium executor subagents and review with GPT-5.5 high code-reviewer agents.",
+    "Before merge eligibility, fix or explicitly accept the remaining scheduler idempotency test failure, then rerun the full native test sweep.",
+    "When ready, back up .native-media before merge, commit current branch changes with Lore commit protocol, push origin/feat/native-grok-imagine-video, and then merge in the same worktree or preserve NATIVE_MEDIA_ROOT to the canonical store.",
+    "If moving to a new feature branch after merge, keep AGENTS.md and NATIVE_MEDIA_ROOT rules in place and verify existing native paths before handing back for testing.",
+    "Last-frame ffmpeg download feature is planned in docs/plans/native-video-last-frame-download-plan.md but not implemented yet."
+  ],
+  "read_first": [
+    "/home/k8r1m/Open-Generative-AI/AGENTS.md",
+    "/home/k8r1m/Open-Generative-AI/docs/state/native-media-library-delete-copy-tests.md",
+    "/home/k8r1m/Open-Generative-AI/docs/plans/native-media-regression-fix-plan.md",
+    "/home/k8r1m/Open-Generative-AI/docs/plans/native-video-last-frame-download-plan.md",
+    "/home/k8r1m/Open-Generative-AI/native-media-gateway/exports.js",
+    "/home/k8r1m/Open-Generative-AI/native-media-gateway/server.js",
+    "/home/k8r1m/Open-Generative-AI/packages/studio/src/nativeMedia.js",
+    "/home/k8r1m/Open-Generative-AI/packages/studio/src/components/ImageStudio.jsx",
+    "/home/k8r1m/Open-Generative-AI/packages/studio/src/components/VideoStudio.jsx",
+    "/home/k8r1m/Open-Generative-AI/tests/nativeSchedulerRecovery.test.js",
+    "/home/k8r1m/Open-Generative-AI/tests/nativeStoreRoot.test.js"
+  ]
+}

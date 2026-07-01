@@ -21,6 +21,7 @@ const TERMINAL_NATIVE_STATUSES = new Set([
   'interrupted_process',
   'outcome_unknown',
   'asset_unavailable',
+  'unavailable',
 ]);
 
 const STRUCTURAL_PARAMETER_KEYS = [
@@ -343,6 +344,32 @@ export async function deleteNativeLibraryItem(jobId) {
     const detail = await res.text().catch(() => '');
     throw new Error(`Native library delete failed: ${res.status} ${res.statusText} ${detail.slice(0, 120)}`);
   }
+}
+
+export async function copyPromptToClipboard(text) {
+  const value = text || '';
+  try {
+    if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value);
+      return true;
+    }
+  } catch {}
+
+  try {
+    const textarea = document.createElement('textarea');
+    textarea.value = value;
+    textarea.setAttribute('readonly', '');
+    textarea.style.position = 'fixed';
+    textarea.style.left = '-9999px';
+    document.body.appendChild(textarea);
+    textarea.select();
+    const copied = document.execCommand('copy');
+    document.body.removeChild(textarea);
+    if (copied) return true;
+  } catch {}
+
+  if (typeof alert === 'function') alert('Copy failed. Select and copy the prompt text manually.');
+  return false;
 }
 
 async function fetchNativeJob(jobId) {

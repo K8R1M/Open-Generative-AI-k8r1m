@@ -13,3 +13,4 @@ Current active plan set:
 - `grok-imagine-video-provider-audit-status.md` - external audit issue/run IDs and expected report paths.
 - `native-media-asset-library-delete-copy-plan.md` - follow-up plan for preserving all native generated assets across branch merges, hydrating the UI from server-side `.native-media`, and adding copy/delete card actions.
 - `native-video-last-frame-download-plan.md` - follow-up plan for extracting the final frame of a native video generation with ffmpeg for reuse as the next first frame.
+- `native-media-regression-fix-plan.md` - next-phase fix plan for native image 500s, historical prompt/copy regressions, and broken historical video playback.

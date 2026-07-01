@@ -79,7 +79,6 @@ function buildEnv(baseEnv) {
     env[key] = String(value);
   }
   if (
-    src[GATED_GOOGLE_ADC_ALLOW_ENV] === '1' &&
     typeof src[GATED_GOOGLE_ADC_ENV] === 'string' &&
     src[GATED_GOOGLE_ADC_ENV]
   ) {
@@ -95,12 +94,13 @@ function parseMediaStdout(stdout) {
   return match ? match[1].trim() : null;
 }
 
-function redactProviderText(text, { prompt } = {}) {
+function redactProviderText(text, { prompt, credentialPath } = {}) {
   let out = String(text || '');
   if (prompt) out = out.split(String(prompt)).join('<prompt>');
   out = out.split(REPO_ROOT).join('<repo>');
-  const creds = process.env.GOOGLE_APPLICATION_CREDENTIALS;
-  if (creds) out = out.split(String(creds)).join('<google-credentials>');
+  for (const creds of [process.env.GOOGLE_APPLICATION_CREDENTIALS, credentialPath]) {
+    if (creds) out = out.split(String(creds)).join('<google-credentials>');
+  }
   return out.slice(-4096);
 }
 
@@ -318,7 +318,7 @@ async function runVertexVideoProvider(job, clean, ctx, opts = {}) {
     resolveOutputPath: () => parseMediaStdout(stdout) || outputPath,
     settlePatch: (patch) => {
       if (!stderr || patch.status === 'completed') return null;
-      return { detail: redactProviderText(stderr, { prompt: clean.prompt }) };
+      return { detail: redactProviderText(stderr, { prompt: clean.prompt, credentialPath: env.GOOGLE_APPLICATION_CREDENTIALS }) };
     },
   });
 

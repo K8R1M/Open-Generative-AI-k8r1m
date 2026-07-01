@@ -15,7 +15,6 @@ const PRIVATE_JOB_FIELDS = new Set([
   'providerConfig',
   'codexDiagnostics',
   'grokDiagnostics',
-  'prompt',
 ]);
 
 function json(res, body, status = 200) {
@@ -34,7 +33,13 @@ function noContent(res) {
 
 function safeError(error) {
   const message = String(error && error.message || '');
-  if (/credential|unsupported|required|forbidden|invalid|missing|not found|mime|duration|reference|input|asset/i.test(message)) {
+  if (error instanceof SyntaxError) {
+    return { status: 400, body: { error: 'BAD_REQUEST', message: 'Invalid native media request.' } };
+  }
+  if (/real provider requested but no real provider runner is available|real provider unavailable/i.test(message)) {
+    return { status: 503, body: { error: 'REAL_PROVIDER_UNAVAILABLE', message } };
+  }
+  if (/credential|unsupported|required|forbidden|invalid|missing|not found|mime|duration|reference|input|asset|request must be an object/i.test(message)) {
     return { status: 400, body: { error: 'BAD_REQUEST', message: 'Invalid native media request.' } };
   }
   console.error('[native-media-gateway]', error);
@@ -77,12 +82,21 @@ function publicJob(job) {
   return out;
 }
 
-function generationOptions() {
+function generationOptions(request = {}) {
   const liveVertex = process.env.NATIVE_MEDIA_LIVE_VERTEX === '1';
   const liveCodex = process.env.NATIVE_MEDIA_LIVE_CODEX === '1';
   const liveGrok = process.env.NATIVE_MEDIA_LIVE_GROK === '1';
+  const provider = gateway.providerFor(request && typeof request === 'object' && !Array.isArray(request) ? request.modelId : null);
+  const isImage = request && (request.task === 'text-to-image' || request.task === 'image-to-image');
+  const real =
+    (provider === 'vertex' && liveVertex) ||
+    (provider === 'codex' && liveCodex) ||
+    (provider === 'grok' && liveGrok);
+  if (isImage && provider && !real) {
+    throw new Error(`real provider unavailable for native image generation: ${provider}`);
+  }
   return {
-    provider: { fake: !(liveVertex || liveCodex || liveGrok) },
+    provider: { fake: isImage ? false : !real },
     liveVertex,
     liveCodex,
     liveGrok,
@@ -234,7 +248,8 @@ async function handleNativeRequest(req, res) {
     if (req.method === 'POST') {
       if (resource === 'uploads') return json(res, await uploadFromRequest(req, url), 201);
       if (resource === 'generations') {
-        const job = await gateway.submitGeneration(await readJson(req), generationOptions());
+        const body = await readJson(req);
+        const job = await gateway.submitGeneration(body, generationOptions(body));
         return json(res, publicJob(job), 201);
       }
     }
