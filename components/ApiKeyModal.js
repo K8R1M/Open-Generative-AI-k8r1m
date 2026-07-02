@@ -39,7 +39,7 @@ export default function ApiKeyModal({ onSave, onClose, overlay = false, title, s
             </svg>
           </div>
           <h1 className="text-xl font-bold text-white tracking-tight mb-2">
-            {title || 'Open Generative AI'}
+            {title || 'Merlin Studio'}
           </h1>
           <p className="text-white/40 text-[13px] leading-relaxed px-4">
             {subtitle || (

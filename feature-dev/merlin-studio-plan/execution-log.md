@@ -251,3 +251,12 @@ Append-only. Newest entries go at the bottom.
 - File inspection: JPEG, progressive, `1983x793`, about `2.5:1` wide logo ratio. The original file was not modified and no resized copies were created.
 - Karim explicitly wants no more substantive work in the current high-context session. Next session should continue from the live state files and preserve handoff, then wire the logo/rebrand minimally on `main`, verify/build, and only then configure systemd hosting on `19300`.
 - Current branch alignment remains: `/home/k8r1m/Open-Generative-AI` is `feature/merlin-studio-v1`; `/home/k8r1m/Open-Generative-AI-main-19300` is `main` and contains the untracked logo source.
+
+## 2026-07-02 -- Slice 03 minimal logo/rebrand on main
+
+- Scope: continued Slice 03 only in `/home/k8r1m/Open-Generative-AI-main-19300` on `main`; no Phase 2 feature work started.
+- Rebrand changes: header logo now uses `/merlin-studio-logo-v1.jpg`; user-visible metadata/titles/fallback labels now say `Merlin Studio`; Vadoo promo banner state and markup were removed.
+- Internal identifiers intentionally unchanged: package names, repo URLs, README provenance, and `packages/studio/package.json` description.
+- Checks passed: `npm run build:studio`; `npx playwright test tests/e2e/rebrand-smoke.spec.js --reporter=line` (`1 passed`); `npm run build:packages && npm run build`.
+- Playwright setup note: `@playwright/test` was declared in `package.json`/`package-lock.json` but missing from `node_modules`; `npm install` restored declared packages before the focused smoke.
+- Remaining Slice 03 work: configure systemd hosting on `19300`, verify app/library health, then update state files again.

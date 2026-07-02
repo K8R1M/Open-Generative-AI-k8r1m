@@ -7,8 +7,8 @@ const inter = Inter({
 });
 
 export const metadata = {
-  title: 'Open Generative AI — Free AI Image & Video Studio',
-  description: 'Generate AI images and videos using 200+ models — Flux, Midjourney, Kling, Veo, Seedance and more.',
+  title: 'Merlin Studio — AI Image & Video Studio',
+  description: 'Merlin Studio — personal AI image and video production portal.',
 };
 
 export default function RootLayout({ children }) {

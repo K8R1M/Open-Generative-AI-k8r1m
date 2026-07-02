@@ -73,7 +73,7 @@ export default function McpCliStudio() {
           </div>
           <h1 className="text-4xl md:text-5xl font-bold tracking-tight">MCP &amp; CLI</h1>
           <p className="text-white/60 text-base md:text-lg max-w-2xl">
-            Use Open Generative AI from your terminal, your IDE, or any MCP-compatible
+            Use Merlin Studio from your terminal, your IDE, or any MCP-compatible
             assistant. Generate cinematic images, videos, and audio across 100+ models —
             without leaving your workflow.
           </p>

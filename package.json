@@ -39,7 +39,7 @@
   },
   "build": {
     "appId": "ai.generative.open",
-    "productName": "Open Generative AI",
+    "productName": "Merlin Studio",
     "copyright": "Copyright © 2025",
     "directories": {
       "output": "release"
@@ -92,7 +92,7 @@
     "linux": {
       "icon": "public/banner.png",
       "category": "Utility",
-      "maintainer": "Open Generative AI Team",
+      "maintainer": "Merlin",
       "extraFiles": [
         {
           "from": "build/linux/apparmor.profile",
