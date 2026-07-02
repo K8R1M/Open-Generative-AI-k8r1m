@@ -5,7 +5,7 @@ Executors: GPT 5.5 High (orchestrator + backend/architecture coder), GLM 5.2 (fr
 Karim reviews at the end of each phase gate; Fable returns at the audit step,
 end of Phase 1, and final review.
 
-**PLAN STATUS: `FINAL — GATE A2 SIGNED OFF — LOCAL MAIN MERGED — SLICE 03 PARTIAL` (2026-07-02: C0-C3 passed review, Karim signed off Gate A2 on 19400, local `main` fast-forwarded to commit `ac4cc2b`; next Slice 03 work is rebrand + systemd hosting on 19300 + Phase 2 runtime policy.)**
+**PLAN STATUS: `PHASE 1 SHIPPED — AWAITING FABLE PHASE 2 REVIEW` (2026-07-03: Slice 03 recovery is complete; `main`/19300 are the stable Merlin Studio daily app; `feature/merlin-studio-v1` is aligned to the fixed main baseline; no Phase 2 feature work has started.)**
 (Only Fable updates this line. Executors: if the status is not
 `FINAL — PHASE 1 APPROVED` or later, do not write any code.)
 

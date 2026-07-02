@@ -110,6 +110,7 @@ Scope for this orchestration window: Phase 1 slices 00, 01, 02 only; stop at Gat
 - [x] 03.B Merge gate to main (local `main` fast-forwarded to `ac4cc2b`; not pushed).
 - [x] 03.C Configure systemd hosting on 19300.
 - [x] 03.D Open Phase 2 branch/runtime policy.
+- [x] 03.R Recovery complete: 19300 production build restored, all native live provider flags verified, logo mark visibility fixed, and `main` ready to push.
 
 ## Phase 2 -- Merlin Studio Features (Not In Scope This Window)
 

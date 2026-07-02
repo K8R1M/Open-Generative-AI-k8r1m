@@ -289,3 +289,10 @@ Append-only. Newest entries go at the bottom.
 - Task 3 - focused checks: `node --test tests/nativeOmniVideoProvider.test.js tests/nativeValidationMessages.test.js` passed `11/11` (note: these suites use Node's native test runner, not Jest — `npx jest` on them fails with "must contain at least one test"; `node --test` is correct). Spot-checked live provider capabilities via `GET http://127.0.0.1:19334/capabilities`: Vertex (`nano-banana-2`, `nano-banana-pro`, `veo-3.1`, `veo-3.1-fast`), Omni (`gemini-omni-flash-preview`), Codex (`gpt-image-2`), and Grok (`imagine-video`) all registered with live provider keys — matches the plan's "no env fix needed" baseline.
 - Commit: `bc444f7` ("Restore 19300 prod build and fix logo mark visibility") on `main` in this worktree, containing only `components/StandaloneShell.js` and the new `public/merlin-studio-logo-v1-cropped.jpg`. The `.next` rebuild artifact was not committed (gitignored build output). Untracked `.native-media` / `.native-media-test` in this worktree were left alone, not staged.
 - Slice 03 recovery status: complete. `main`/`19300` frozen again per existing Phase 2 policy; no Phase 2 feature work started.
+
+## 2026-07-03 -- Slice 03 closed and ready for GitHub push
+
+- Runtime check before push: `studio-gateway.service` and `studio-portal.service` are active; `curl -fsSI http://127.0.0.1:19300/studio` returns `HTTP/1.1 200 OK`; `native-media-gateway/bin/check-fresh.sh 19334` returns fresh; `19335` is not listening.
+- Verified production gateway env includes all live native provider gates: `NATIVE_MEDIA_LIVE_VERTEX=1`, `NATIVE_MEDIA_LIVE_CODEX=1`, `NATIVE_MEDIA_LIVE_GROK=1`, and `NATIVE_MEDIA_LIVE_OMNI=1`, with shared `NATIVE_MEDIA_ROOT=/home/k8r1m/Open-Generative-AI/.native-media` and Google ADC/project env.
+- `/home/k8r1m/Open-Generative-AI` branch `feature/merlin-studio-v1` was fast-forwarded to the fixed `main` baseline commit `c1c5bd7`; no Phase 2 feature work was started.
+- State: Phase 1/Slice 03 is over. Next required step is Fable Phase 2 review before any slices 04-11 implementation.
