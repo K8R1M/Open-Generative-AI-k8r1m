@@ -315,9 +315,9 @@ export default function StandaloneShell() {
           {/* Left: Logo */}
           <div className="flex-shrink-0 flex items-center gap-2">
             <img
-              src="/merlin-studio-logo-v1.jpg"
+              src="/merlin-studio-logo-v1-cropped.jpg"
               alt="Merlin Studio"
-              className="h-8 w-auto max-w-[150px] sm:max-w-[190px] object-contain"
+              className="h-7 sm:h-8 w-auto max-w-[220px] sm:max-w-[280px] object-contain"
             />
           </div>
 
