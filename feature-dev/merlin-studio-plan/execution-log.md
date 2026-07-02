@@ -271,3 +271,10 @@ Append-only. Newest entries go at the bottom.
 - Journal check: latest `journalctl --user -u studio-gateway.service -u studio-portal.service -n 50` showed clean startup/restart logs and native media reconciliation with `unchanged: 146`.
 - Linger check: `loginctl show-user "$USER" -p Linger` returned `Linger=yes`.
 - Phase 2 policy: `/home/k8r1m/Open-Generative-AI` remains on `feature/merlin-studio-v1`; no Phase 2 feature work was started. From here, `main`, `19300`, and the two `studio-*` services are frozen until Fable Phase 2 review/approval or a future approved Gate D redeploy.
+
+## 2026-07-02 -- Slice 03 production Omni runtime hotfix
+
+- Karim reported that Omni native video generation with a video reference errored on `19300` after the systemd cutover.
+- Root cause found by local inspection + subagents: production `studio-gateway.service` initially preserved Vertex/Codex live flags but omitted `NATIVE_MEDIA_LIVE_OMNI=1`; a stale orphan dev gateway was also still listening on `19335`.
+- Runtime fix applied: added `Environment=NATIVE_MEDIA_LIVE_OMNI=1` to `/home/k8r1m/.config/systemd/user/studio-gateway.service`, ran `systemctl --user daemon-reload`, restarted `studio-gateway.service` and `studio-portal.service`, and killed orphan pid `4188445` on `19335`.
+- Verification passed: `studio-gateway.service`/`studio-portal.service` active; `native-media-gateway/bin/check-fresh.sh 19334` fresh; gateway env includes shared `NATIVE_MEDIA_ROOT`, Google project/ADC, `NATIVE_MEDIA_LIVE_VERTEX=1`, `NATIVE_MEDIA_LIVE_CODEX=1`, and `NATIVE_MEDIA_LIVE_OMNI=1`; `19335` no longer listens; `curl -I http://127.0.0.1:19300/studio` returned `HTTP/1.1 200 OK`.
