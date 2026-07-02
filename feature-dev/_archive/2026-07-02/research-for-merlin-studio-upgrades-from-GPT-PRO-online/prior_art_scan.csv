@@ -1,0 +1,17 @@
+tool_or_repo,url,license_status,stack_fit,maturity,reuse_recommendation,useful_patterns
+Wonder Unit Storyboarder,https://github.com/wonderunit/storyboarder,MIT-with-exceptions claimed in older post; verify current repo license,Electron/JS desktop storyboard/animatic tool,Mature UX; desktop maintenance appears low,Copy UX ideas; avoid direct code until license/fork reviewed,"Shot numbering, boards, animatic mindset"
+OpenTimelineIO,https://opentimelineio.readthedocs.io/en/latest/,Open-source; verify exact SPDX before dependency,Python/C++; metadata interchange,Mature industry standard,"Reuse concepts, not necessary as dependency in V1",External media references; clips/tracks/timeline data
+Kitsu / Zou,https://github.com/cgwire/zou,AGPL-3.0,Python/Flask production tracking backend,Mature,Copy data concepts; avoid direct code if AGPL incompatible,"Projects, sequences, shots, assets, tasks, statuses"
+ComfyUI,https://github.com/comfyanonymous/ComfyUI,License review required before embedding,Python node workflow UI,Very mature AI workflow ecosystem,Copy node/provenance ideas only for V1,Reusable graphs and output-as-input workflows
+Comfy Workflow Templates,https://github.com/Comfy-Org/workflow_templates,MIT,Template repo,Active ecosystem,Reuse pattern for versioned templates,Prompt/workflow templates grouped by task
+InvokeAI,https://github.com/invoke-ai/InvokeAI,Repo/license should be verified before direct reuse,React UI + generation backend,Mature,Copy asset/canvas/prompt UX ideas,"Canvas, gallery, provenance, asset reuse"
+SwarmUI,https://github.com/mcmonkeyprojects/SwarmUI,MIT,Web UI around AI backends,Active beta,Copy compare-grid idea,Variant comparisons and parameter grids
+Toonflow,https://github.com/HBAI-Ltd/Toonflow-app,Apache-2.0,TypeScript/Node/Electron/Docker,"Popular, active, ambitious",Study deeply; possible code reuse after audit but ideas first,Text→character/storyboard/video; infinite canvas; agents
+WaooWaoo,https://github.com/waooAI/waoowaoo,Unclear from observed listing; verify,"Next.js 15, React 19, MySQL, Prisma, Redis, BullMQ",Popular but early/beta,Copy ideas only,"Script/novel parsing, character/scene extraction, storyboard video"
+ViMax,https://github.com/HKUDS/ViMax,MIT,Python agents/pipelines/prompts,Active research/product repo,Reuse pipeline concepts; no UI code fit,"Script understanding, storyboard, shot list, first/last-frame pipeline"
+React Flow / xyflow,https://github.com/xyflow/xyflow,MIT,React/Svelte node UI,Very mature,Potential future Workflow Studio/Canvas dependency,Node graph UI if/when needed
+tldraw,https://tldraw.dev/docs/license,Commercial/production license model,React infinite canvas SDK,Mature,Avoid in OSS V1 unless licensing handled,Infinite canvas UX only
+Langfuse prompt management,https://langfuse.com/docs/prompt-management/overview,Open-source/open-core; verify components,Service/backend prompt management,Mature,Copy prompt versioning ideas,Versioned prompt templates and testing
+AUTOMATIC1111 PNG Info,https://github.com/AUTOMATIC1111/stable-diffusion-webui/wiki/Features,Open-source; license depends on repo,Python web UI,Mature,Copy provenance idea,Prompt/settings metadata attached to outputs
+ShotList,https://github.com/zhourj/ShotList,GPL-2.0,Metadata extraction/export,Mature niche,Copy idea only,Media metadata table/export
+OSideMedia Higgsfield Prompt Skill,https://github.com/OSideMedia/higgsfield-ai-prompt-skill,MIT; unofficial,Prompt-skill markdown/templates,Recent but unofficial,Prompt taxonomy inspiration only,Camera/subject/look/action prompt structure

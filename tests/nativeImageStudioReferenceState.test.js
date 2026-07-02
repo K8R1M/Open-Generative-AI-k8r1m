@@ -64,3 +64,24 @@ test('ImageStudio UploadButton enforces native uploads before any legacy uploade
   assert.match(source, /nativeUpload\s*\?\s*async \(file\) => \(await uploadNativeFile\(file\)\)\.url\s*:\s*uploader \|\| \(\(file, onProgress\) => defaultUploader\(apiKey, file, onProgress\)\)/);
   assert.match(source, /<UploadButton[\s\S]*nativeUpload=\{isNativeModelId\(selectedModelId\)\}/);
 });
+
+test('ImageStudio generated image reference actions are native same-origin gated', () => {
+  assert.match(source, /const GENERATED_IMAGE_TO_IMAGE_STUDIO_KEY = "nativeGeneratedImageReference:image"/);
+  assert.match(source, /function generatedImageReferenceUrls\(entry\) \{/);
+  assert.match(source, /entry\?\.native && isSameOriginAssetUrl\(entry\?\.url\) \? \[entry\.url\] : \[\]/);
+  assert.match(source, /title="Use as Image Studio reference"/);
+  assert.match(source, /title="Use as Video Studio input"/);
+  assert.match(source, /onGeneratedImageReference\?\.\("image", referenceUrls\)/);
+  assert.match(source, /onGeneratedImageReference\?\.\("video", referenceUrls\)/);
+});
+
+test('ImageStudio consumes generated image handoff once and appends references', () => {
+  assert.match(source, /const appendGeneratedImageReferences = useCallback\(/);
+  assert.match(source, /setUploadedImageUrls\(\(prev\) => \{/);
+  assert.match(source, /const next = \[\.\.\.prev\]/);
+  assert.match(source, /if \(!next\.includes\(url\)\) next\.push\(url\)/);
+  assert.match(source, /sessionStorage\.getItem\(GENERATED_IMAGE_TO_IMAGE_STUDIO_KEY\)/);
+  assert.match(source, /sessionStorage\.removeItem\(GENERATED_IMAGE_TO_IMAGE_STUDIO_KEY\)/);
+  assert.match(source, /payload\?\.source === "generated-image"/);
+  assert.doesNotMatch(source, /setPrompt\(payload/);
+});

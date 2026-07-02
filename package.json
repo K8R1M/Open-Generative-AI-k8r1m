@@ -20,6 +20,8 @@
     "build:workflow": "npm run build -w workflow-builder",
     "build:agent": "npm run build -w ai-agent",
     "build:packages": "npm run build:workflow && npm run build:agent && npm run build:studio",
+    "test:e2e": "playwright test",
+    "test:unit": "node --test tests/",
     "setup": "git submodule update --init --recursive && npm install && npm run build:packages",
     "vite:dev": "vite",
     "vite:build": "vite build",
@@ -114,17 +116,18 @@
     }
   },
   "dependencies": {
+    "ai-agent": "file:./packages/Open-Poe-AI/packages/agents",
     "axios": "^1.7.0",
     "next": "^15.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-hot-toast": "^2.4.1",
     "studio": "*",
-    "workflow-builder": "file:./packages/Vibe-Workflow/packages/workflow-builder",
-    "ai-agent": "file:./packages/Open-Poe-AI/packages/agents"
+    "workflow-builder": "file:./packages/Vibe-Workflow/packages/workflow-builder"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
+    "@playwright/test": "^1.61.1",
     "@tailwindcss/vite": "^4.1.18",
     "autoprefixer": "^10.4.24",
     "electron": "^33.4.11",

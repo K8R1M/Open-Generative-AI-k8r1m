@@ -15,5 +15,5 @@ export { default as AppsStudio } from './components/AppsStudio';
 export { default as McpCliStudio } from './components/McpCliStudio';
 export * from './muapi';
 export * from './nativeModels';
-export * from './nativeModelRegistry';
+export { NATIVE_FEATURE_FLAG, getNativeCapabilities, hasUsableNativeCapabilities } from './nativeModelRegistry';
 export * from './nativeMedia';

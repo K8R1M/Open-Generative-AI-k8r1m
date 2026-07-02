@@ -2,10 +2,20 @@
 
 const http = require('node:http');
 const fs = require('node:fs');
+const fsp = require('node:fs/promises');
+const path = require('node:path');
+const os = require('node:os');
+const crypto = require('node:crypto');
 const gateway = require('./exports.js');
+const projects = require('./projects.js');
+const { runLastFrameHelper } = require('./frames.js');
 
 const HOST = '127.0.0.1';
 const DEFAULT_PORT = 19334;
+const BOOT_STARTED_AT = new Date().toISOString();
+const SOURCE_FINGERPRINT = fs.readdirSync(__dirname)
+  .filter((name) => name.endsWith('.js'))
+  .reduce((max, name) => Math.max(max, fs.statSync(path.join(__dirname, name)).mtimeMs), 0);
 const PRIVATE_JOB_FIELDS = new Set([
   'outputPath',
   'detail',
@@ -34,15 +44,29 @@ function noContent(res) {
   res.end();
 }
 
+function healthPayload() {
+  return {
+    ok: true,
+    service: 'native-media',
+    startedAt: BOOT_STARTED_AT,
+    pid: process.pid,
+    sourceFingerprint: SOURCE_FINGERPRINT,
+    port: Number(process.env.NATIVE_MEDIA_GATEWAY_PORT || DEFAULT_PORT),
+  };
+}
+
 function safeError(error) {
   const message = String(error && error.message || '');
+  if (error && error.nativeMediaBody && error.nativeMediaStatus) {
+    return { status: error.nativeMediaStatus, body: error.nativeMediaBody };
+  }
   if (error instanceof SyntaxError) {
     return { status: 400, body: { error: 'BAD_REQUEST', message: 'Invalid native media request.' } };
   }
   if (/real provider requested but no real provider runner is available|real provider unavailable/i.test(message)) {
     return { status: 503, body: { error: 'REAL_PROVIDER_UNAVAILABLE', message: 'Native provider unavailable.' } };
   }
-  if (/credential|unsupported|required|forbidden|invalid|missing|not found|mime|duration|reference|input|asset|request must be an object/i.test(message)) {
+  if (/credential|unsupported|required|forbidden|invalid|missing|not found|completed|mime|duration|reference|input|asset|request must be an object/i.test(message)) {
     return { status: 400, body: { error: 'BAD_REQUEST', message: 'Invalid native media request.' } };
   }
   console.error('[native-media-gateway]', error);
@@ -230,13 +254,64 @@ function streamAsset(res, asset, rangeHeader) {
   });
 }
 
+function safeAttachmentName(job) {
+  const raw = String(
+    job && (job.displayName || job.downloadName || job.filename || job.id) || 'native-video'
+  );
+  const base = path.basename(raw).replace(/\.[A-Za-z0-9]+$/, '');
+  const safe = base.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 120);
+  return `${safe || 'native-video'}-last-frame.png`;
+}
+
+async function streamLastFrame(res, job, asset) {
+  const tempDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'native-last-frame-'));
+  const outputPath = path.join(tempDir, `${crypto.randomUUID()}.png`);
+  let cleanupPromise = null;
+  const cleanup = () => {
+    if (!cleanupPromise) cleanupPromise = fsp.rm(tempDir, { recursive: true, force: true });
+    return cleanupPromise;
+  };
+
+  try {
+    await runLastFrameHelper(asset.path, outputPath);
+    const stats = await fsp.stat(outputPath);
+    if (!stats.isFile() || stats.size < 1) throw new Error('last frame extraction failed');
+    const stream = fs.createReadStream(outputPath);
+    stream.on('error', () => {
+      cleanup().catch(() => {});
+      if (!res.headersSent) {
+        res.writeHead(500, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ error: 'NATIVE_MEDIA_ERROR', message: 'Last frame extraction failed.' }));
+      } else {
+        res.destroy();
+      }
+    });
+    stream.on('close', () => cleanup().catch(() => {}));
+    res.on('close', () => cleanup().catch(() => {}));
+    res.writeHead(200, {
+      'content-type': 'image/png',
+      'content-length': String(stats.size),
+      'content-disposition': `attachment; filename="${safeAttachmentName(job)}"`,
+      'cache-control': 'no-store',
+    });
+    stream.pipe(res);
+    await new Promise((resolve) => {
+      stream.on('close', resolve);
+    });
+    await cleanup();
+  } catch (error) {
+    await cleanup();
+    throw error;
+  }
+}
+
 async function handleNativeRequest(req, res) {
   const url = new URL(req.url, `http://${HOST}`);
   const parts = routeParts(url);
   const [resource, id] = parts;
   try {
     if (req.method === 'GET') {
-      if (!resource || resource === 'health') return json(res, { ok: true, service: 'native-media' });
+      if (!resource || resource === 'health') return json(res, healthPayload());
       if (resource === 'ready') return json(res, { ok: true, ready: true });
       if (resource === 'capabilities') return json(res, gateway.getNativeCapabilities());
       if (resource === 'library' && !id) {
@@ -262,6 +337,23 @@ async function handleNativeRequest(req, res) {
         const body = await readJson(req);
         const job = await gateway.submitGeneration(body, generationOptions(body));
         return json(res, publicJob(job), 201);
+      }
+      if (resource === 'library' && id && parts.length === 3 && parts[2] === 'last-frame') {
+        const resolved = await gateway.resolveLibraryVideoAsset(id);
+        if (!resolved) return json(res, { error: 'library job not found' }, 404);
+        await streamLastFrame(res, resolved.job, resolved.asset);
+        return;
+      }
+      if (resource === 'projects' && id === 'frame-from-job' && parts.length === 2) {
+        if (process.env.NATIVE_MEDIA_PROJECTS !== '1') return json(res, { error: 'native media route not found' }, 404);
+        const saved = await projects.frameFromJob(await readJson(req));
+        return saved ? json(res, saved, 201) : json(res, { error: 'library job not found' }, 404);
+      }
+    }
+    if (req.method === 'PATCH') {
+      if (resource === 'library' && id && parts.length === 2) {
+        const job = await gateway.renameLibraryJob(id, await readJson(req));
+        return job ? json(res, publicJob(job)) : json(res, { error: 'library job not found' }, 404);
       }
     }
     if (req.method === 'DELETE' && resource === 'generations' && id) {
@@ -290,6 +382,7 @@ async function start() {
   const server = createServer();
   await new Promise((resolve) => server.listen(port, HOST, resolve));
   console.log(`[native-media-gateway] root=${store.root} jobs=${store.jobs} assets=${store.assets} uploads=${store.uploads} reconcile=${JSON.stringify(counts)}`);
+  console.log(`[native-media-gateway] boot startedAt=${BOOT_STARTED_AT} pid=${process.pid} port=${port} sourceFingerprint=${SOURCE_FINGERPRINT}`);
   console.log(`[native-media-gateway] listening on http://${HOST}:${port}`);
   return server;
 }

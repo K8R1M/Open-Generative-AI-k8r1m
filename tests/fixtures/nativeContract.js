@@ -30,6 +30,7 @@ const NATIVE_ROUTES = [
   'DELETE /api/native-media/v1/generations/:id',
   'GET /api/native-media/v1/library',
   'DELETE /api/native-media/v1/library/:jobId',
+  'POST /api/native-media/v1/library/:jobId/last-frame',
   'GET /api/native-media/v1/assets/:assetId',
 ];
 

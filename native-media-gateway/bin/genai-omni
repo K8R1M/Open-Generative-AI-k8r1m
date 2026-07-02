@@ -115,7 +115,7 @@ def _write_json(path: Path, data: dict[str, Any]) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Generate video with Gemini Omni Flash Preview via Vertex AI")
-    parser.add_argument("--prompt", "-p", required=True)
+    parser.add_argument("--prompt", "-p", default="")
     parser.add_argument("--output", "-o", required=True)
     parser.add_argument("--input-image", action="append", default=[])
     parser.add_argument("--input-video", action="append", default=[])
@@ -171,7 +171,9 @@ def main() -> int:
     _write_json(metadata_path, metadata)
 
     print(f"Estimated cost: ${cost['estimated_total_usd_excluding_text']:.2f}", file=sys.stderr)
-    parts = [types.Part.from_text(text=args.prompt)]
+    parts = []
+    if args.prompt:
+        parts.append(types.Part.from_text(text=args.prompt))
     for input_path in image_paths:
         parts.append(types.Part.from_bytes(data=input_path.read_bytes(), mime_type=_mime_type(input_path, "image/png")))
     for input_path in video_paths:

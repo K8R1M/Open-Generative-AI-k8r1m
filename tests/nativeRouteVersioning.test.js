@@ -2,6 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { EventEmitter } = require('node:events');
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -14,6 +15,12 @@ const routeSource = () =>
 const serverSource = () =>
   fs.readFileSync(
     path.join(process.cwd(), 'native-media-gateway/server.js'),
+    'utf8'
+  );
+
+const lastFrameHelperSource = () =>
+  fs.readFileSync(
+    path.join(process.cwd(), 'native-media-gateway/bin/extract-last-frame.js'),
     'utf8'
   );
 
@@ -45,6 +52,49 @@ test('native media worker can enable live providers from env gates', () => {
   assert.match(source, /provider:\s*\{\s*fake:\s*\(isImage\s*\|\|\s*isOmni\)\s*\?\s*false\s*:\s*!real\s*\}/);
   assert.match(source, /gateway\.submitGeneration\(body,\s*generationOptions\(body\)\)/);
   assert.match(source, /gateway\.reconcileOnRestart\(\)/);
+});
+
+test('native media last-frame helper uses fixed ffprobe and ffmpeg argv without a shell', () => {
+  const source = lastFrameHelperSource();
+  assert.match(source, /spawnChild\(command,\s*args,\s*\{\s*shell:\s*false/);
+  assert.match(source, /process\.once\('SIGTERM',\s*handleExitSignal\)/);
+  assert.match(source, /killActiveChild\(signal\)/);
+  assert.match(source, /killActiveChild\('SIGKILL'\)/);
+  assert.match(source, /run\('ffprobe',\s*\[/);
+  assert.match(source, /'-count_frames'/);
+  assert.match(source, /'stream=nb_read_frames'/);
+  assert.match(source, /run\('ffmpeg',\s*\[/);
+  assert.match(source, /'-vf',\s*`select=eq\(n\\\\,/);
+  assert.match(source, /'-frames:v',\s*'1'/);
+});
+
+test('native media last-frame helper cleanup kills the active subprocess', async () => {
+  const helper = require(path.join(process.cwd(), 'native-media-gateway/bin/extract-last-frame.js'));
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.killed = false;
+  const killed = [];
+  child.kill = (signal) => {
+    child.killed = true;
+    killed.push(signal);
+    return true;
+  };
+
+  const pending = helper._test.run('ffprobe', ['-v', 'error'], {
+    spawn(command, args, options) {
+      assert.equal(command, 'ffprobe');
+      assert.deepEqual(args, ['-v', 'error']);
+      assert.equal(options.shell, false);
+      return child;
+    },
+  }).catch((error) => error);
+
+  helper._test.killActiveChild('SIGTERM');
+  child.emit('close', 143);
+
+  assert.deepEqual(killed, ['SIGTERM']);
+  assert.match((await pending).message, /ffprobe failed/);
 });
 
 test('route proxy forwarding executability', async (t) => {

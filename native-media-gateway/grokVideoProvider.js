@@ -79,6 +79,13 @@ function getDuration(parameters) {
   return Number(parameters.durationSeconds ?? parameters.duration);
 }
 
+function validationError(message) {
+  const error = new Error(message);
+  error.nativeMediaStatus = 400;
+  error.nativeMediaBody = { error: 'BAD_REQUEST', message };
+  return error;
+}
+
 function validateAssetPath(filePath) {
   const ext = path.extname(String(filePath || '')).toLowerCase();
   if (!CONSTRAINTS.supportedExtensions.has(ext)) {
@@ -86,10 +93,11 @@ function validateAssetPath(filePath) {
   }
 }
 
-function isUploadedNativeAssetPath(filePath, assetId) {
+function isAllowedNativeAssetPath(filePath, assetId) {
   const resolved = path.resolve(String(filePath || ''));
   const assetDir = path.dirname(resolved);
-  return path.basename(assetDir) === assetId && path.basename(path.dirname(assetDir)) === 'uploads';
+  const parent = path.basename(path.dirname(assetDir));
+  return path.basename(assetDir) === assetId && (parent === 'uploads' || parent === 'assets');
 }
 
 function validateGrokVideoInputs(opts) {
@@ -97,31 +105,31 @@ function validateGrokVideoInputs(opts) {
   const inputs = Array.isArray(opts.inputs) ? opts.inputs : [];
   const resolved = Array.isArray(opts.resolvedFiles) ? opts.resolvedFiles : [];
 
-  if (opts.task !== 'image-to-video') throw new Error(`unsupported Grok video task: ${opts.task}`);
-  if (resolved.length !== inputs.length) throw new Error('input resolution mismatch: every input must resolve to a local asset');
-  if (resolved.length < 1) throw new Error('Grok image-to-video requires at least one uploaded image');
-  if (resolved.length > constraints.maxImages) throw new Error(`Grok reference images exceed maximum of ${constraints.maxImages} total images`);
+  if (opts.task !== 'image-to-video') throw validationError(`unsupported Grok video task: ${opts.task}`);
+  if (resolved.length !== inputs.length) throw validationError('input resolution mismatch: every input must resolve to a local asset');
+  if (resolved.length < 1) throw validationError('Grok image-to-video requires at least one uploaded image');
+  if (resolved.length > constraints.maxImages) throw validationError(`Grok reference images exceed maximum of ${constraints.maxImages} total images`);
 
   const parameters = opts.parameters || {};
   const duration = getDuration(parameters);
-  if (!constraints.durationsSeconds.has(duration)) throw new Error(`unsupported Grok duration: ${parameters.durationSeconds ?? parameters.duration}`);
+  if (!constraints.durationsSeconds.has(duration)) throw validationError(`unsupported Grok duration: ${parameters.durationSeconds ?? parameters.duration}`);
   const resolution = parameters.resolution;
-  if (!constraints.resolutions.has(String(resolution))) throw new Error(`unsupported Grok resolution: ${resolution}`);
+  if (!constraints.resolutions.has(String(resolution))) throw validationError(`unsupported Grok resolution: ${resolution}`);
 
   for (const input of inputs) {
-    if (!input || typeof input !== 'object') throw new Error('invalid input entry');
+    if (!input || typeof input !== 'object') throw validationError('invalid input entry');
     if ((input.kind || 'asset') !== 'asset' || input.url) {
-      throw new Error('Grok video inputs must be uploaded native asset references');
+      throw validationError('Grok video inputs must be native uploaded or generated asset references');
     }
     const assetId = input.assetId || input.asset_id || input.id;
-    if (!assetId) throw new Error('Grok video input is missing an assetId');
-    if (!IMAGE_ROLES.has(input.role || 'input')) throw new Error(`unsupported Grok video input role: ${input.role}`);
+    if (!assetId) throw validationError('Grok video input is missing an assetId');
+    if (!IMAGE_ROLES.has(input.role || 'input')) throw validationError(`unsupported Grok video input role: ${input.role}`);
   }
 
   for (const file of resolved) {
-    if (!file || !file.path) throw new Error('resolved input is missing a local path');
+    if (!file || !file.path) throw validationError('resolved input is missing a local path');
     if (!constraints.supportedInputMime.has(file.mime)) {
-      throw new Error(`unsupported Grok video input MIME type: ${file.mime || 'unknown'}`);
+      throw validationError(`unsupported Grok video input MIME type: ${file.mime || 'unknown'}`);
     }
     validateAssetPath(file.path);
   }
@@ -135,7 +143,7 @@ async function resolveInputAssets(inputs, getAsset) {
   for (const input of list) {
     if (!input || typeof input !== 'object') throw new Error('invalid input entry');
     if ((input.kind || 'asset') !== 'asset' || input.url) {
-      throw new Error('Grok video inputs must be uploaded native asset references');
+      throw new Error('Grok video inputs must be native uploaded or generated asset references');
     }
     const assetId = input.assetId || input.asset_id || input.id;
     if (!assetId || typeof assetId !== 'string') throw new Error('Grok video input is missing an assetId');
@@ -144,7 +152,7 @@ async function resolveInputAssets(inputs, getAsset) {
     }
     const asset = await getAsset(assetId);
     if (!asset || !asset.path) throw new Error(`native input asset not found: ${assetId}`);
-    if (!isUploadedNativeAssetPath(asset.path, assetId)) throw new Error('Grok video inputs must be uploaded native assets');
+    if (!isAllowedNativeAssetPath(asset.path, assetId)) throw new Error('Grok video inputs must be native uploaded or generated assets');
     let size;
     try {
       size = (await fsp.stat(asset.path)).size;
@@ -159,7 +167,7 @@ async function resolveInputAssets(inputs, getAsset) {
 function buildGrokVideoArgs(opts) {
   if (!opts || typeof opts !== 'object') throw new Error('buildGrokVideoArgs requires an options object');
   if (!MODEL_ALIAS[opts.modelId]) throw new Error(`unsupported Grok video model: ${opts.modelId}`);
-  if (typeof opts.prompt !== 'string') throw new Error('prompt is required');
+  if (typeof opts.prompt !== 'string') throw validationError('prompt is required');
   if (!opts.outputPath || typeof opts.outputPath !== 'string') throw new Error('outputPath is required');
 
   const inputPaths = Array.isArray(opts.inputPaths) ? opts.inputPaths : [];
@@ -177,12 +185,12 @@ function buildGrokVideoArgs(opts) {
   const argv = [
     GROK_VIDEO_SCRIPT,
     '--mode', mode,
-    '--prompt', opts.prompt,
     '--output', opts.outputPath,
     '--duration', String(duration),
     '--resolution', resolution,
     '--overwrite',
   ];
+  if (opts.prompt.trim()) argv.splice(3, 0, '--prompt', opts.prompt);
 
   if (mode === 'image-to-video') {
     argv.push('--image', inputPaths[0].path);

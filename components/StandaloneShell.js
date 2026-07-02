@@ -66,6 +66,7 @@ export default function StandaloneShell() {
   const [apiKey, setApiKey] = useState(null);
   const [activeTab, setActiveTab] = useState(getInitialTab());
   const [nativeUsable, setNativeUsable] = useState(null);
+  const [referenceHandoffNonce, setReferenceHandoffNonce] = useState(0);
 
   const [balance, setBalance] = useState(null);
   const [showSettings, setShowSettings] = useState(false);
@@ -103,6 +104,22 @@ export default function StandaloneShell() {
     router.push(`/studio/${tabId}`);
     // setActiveTab(tabId);
   };
+
+  const handleGeneratedImageReference = useCallback((targetStudio, urls) => {
+    if (!['image', 'video'].includes(targetStudio) || !Array.isArray(urls) || urls.length === 0) return;
+    const key = targetStudio === 'video'
+      ? 'nativeGeneratedImageReference:video'
+      : 'nativeGeneratedImageReference:image';
+    const handoffId = typeof crypto !== 'undefined' && crypto.randomUUID
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    sessionStorage.setItem(key, JSON.stringify({ urls, source: 'generated-image', handoffId }));
+    setReferenceHandoffNonce((n) => n + 1);
+    if (activeTab !== targetStudio) {
+      setActiveTab(targetStudio);
+      router.push(`/studio/${targetStudio}`);
+    }
+  }, [activeTab, router]);
 
   // Auto-hide header when inside a specific workflow view or design agent
   useEffect(() => {
@@ -389,8 +406,8 @@ export default function StandaloneShell() {
 
       {/* Studio Content */}
       <div className="flex-1 min-h-0 relative overflow-hidden">
-        {activeTab === 'image'   && <ImageStudio   apiKey={apiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} />}
-        {activeTab === 'video'   && <VideoStudio   apiKey={apiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} />}
+        {activeTab === 'image'   && <ImageStudio   apiKey={apiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} onGeneratedImageReference={handleGeneratedImageReference} referenceHandoffNonce={referenceHandoffNonce} />}
+        {activeTab === 'video'   && <VideoStudio   apiKey={apiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} referenceHandoffNonce={referenceHandoffNonce} />}
         {activeTab === 'clipping' && <ClippingStudio apiKey={apiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} />}
         {activeTab === 'vibe-motion' && <VibeMotionStudio apiKey={apiKey} />}
         {activeTab === 'lipsync' && <LipSyncStudio apiKey={apiKey} droppedFiles={droppedFiles} onFilesHandled={handleFilesHandled} />}

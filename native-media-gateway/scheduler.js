@@ -30,6 +30,7 @@ const TERMINAL_STATUSES = new Set([
   'INTERRUPTED_PROCESS',
   'OUTCOME_UNKNOWN',
   'ASSET_UNAVAILABLE',
+  'asset_deleted',
 ]);
 
 const slots = new Map(); // provider -> Set<jobId>

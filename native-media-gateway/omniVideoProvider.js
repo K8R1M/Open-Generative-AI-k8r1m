@@ -80,6 +80,16 @@ function omniError(code, detail) {
   return err;
 }
 
+function validationError(message) {
+  const error = new Error(message);
+  error.nativeMediaStatus = 400;
+  error.nativeMediaBody = { error: 'BAD_REQUEST', message };
+  error.nativeMediaError = 'OMNI_UNSUPPORTED_INPUT';
+  error.publicMessage = message;
+  error.detail = message;
+  return error;
+}
+
 function isOmniVideoModel(modelId) {
   return modelId && OMNI_VIDEO_MODELS.has(modelId);
 }
@@ -157,40 +167,40 @@ function validateOmniVideoInputs(opts) {
   const inputs = Array.isArray(opts.inputs) ? opts.inputs : [];
   const resolved = Array.isArray(opts.resolvedFiles) ? opts.resolvedFiles : [];
   if (opts.task !== 'text-to-video' && opts.task !== 'image-to-video') {
-    throw omniError('OMNI_UNSUPPORTED_INPUT', `unsupported Omni task: ${opts.task}`);
+    throw validationError(`unsupported Omni task: ${opts.task}`);
   }
-  if (resolved.length !== inputs.length) throw omniError('OMNI_UNSUPPORTED_INPUT', 'input resolution mismatch');
+  if (resolved.length !== inputs.length) throw validationError('input resolution mismatch');
 
   const duration = getDuration(opts.parameters || {});
   if (!Number.isInteger(duration) || duration < 1 || duration > constraints.maxDurationSeconds) {
-    throw omniError('OMNI_UNSUPPORTED_INPUT', `unsupported Omni duration: ${duration}`);
+    throw validationError(`unsupported Omni duration: ${duration}`);
   }
   const aspect = getAspectRatio(opts.parameters || {});
-  if (!constraints.aspectRatios.has(aspect)) throw omniError('OMNI_UNSUPPORTED_INPUT', `unsupported Omni aspect ratio: ${aspect}`);
+  if (!constraints.aspectRatios.has(aspect)) throw validationError(`unsupported Omni aspect ratio: ${aspect}`);
 
   let images = 0;
   let videos = 0;
   for (const input of inputs) {
-    if (!input || typeof input !== 'object') throw omniError('OMNI_UNSUPPORTED_INPUT', 'invalid input entry');
-    if ((input.kind || 'asset') !== 'asset' || input.url) throw omniError('OMNI_UNSUPPORTED_INPUT', 'Omni inputs must be uploaded native asset references');
+    if (!input || typeof input !== 'object') throw validationError('invalid input entry');
+    if ((input.kind || 'asset') !== 'asset' || input.url) throw validationError('Omni inputs must be uploaded native asset references');
     const assetId = input.assetId || input.asset_id || input.id;
-    if (!assetId) throw omniError('OMNI_UNSUPPORTED_INPUT', 'Omni input is missing an assetId');
+    if (!assetId) throw validationError('Omni input is missing an assetId');
   }
   for (const file of resolved) {
-    if (!file || !file.path) throw omniError('OMNI_UNSUPPORTED_INPUT', 'resolved input is missing a local path');
+    if (!file || !file.path) throw validationError('resolved input is missing a local path');
     if (constraints.supportedImageMime.has(file.mime)) {
       images += 1;
-      if (typeof file.size === 'number' && file.size > constraints.imageMaxBytes) throw omniError('OMNI_UNSUPPORTED_INPUT', 'Omni image input exceeds max bytes');
+      if (typeof file.size === 'number' && file.size > constraints.imageMaxBytes) throw validationError('Omni image input exceeds max bytes');
     } else if (constraints.supportedVideoMime.has(file.mime)) {
       videos += 1;
-      if (typeof file.size === 'number' && file.size > constraints.videoMaxBytes) throw omniError('OMNI_UNSUPPORTED_INPUT', 'Omni video input exceeds max bytes');
+      if (typeof file.size === 'number' && file.size > constraints.videoMaxBytes) throw validationError('Omni video input exceeds max bytes');
     } else {
-      throw omniError('OMNI_UNSUPPORTED_INPUT', `unsupported Omni input MIME type: ${file.mime || 'unknown'}`);
+      throw validationError(`unsupported Omni input MIME type: ${file.mime || 'unknown'}`);
     }
   }
-  if (images > constraints.maxImages) throw omniError('OMNI_UNSUPPORTED_INPUT', `Omni input images exceed maximum of ${constraints.maxImages}`);
-  if (videos > constraints.maxVideos) throw omniError('OMNI_UNSUPPORTED_INPUT', `Omni input videos exceed maximum of ${constraints.maxVideos}`);
-  if (opts.task === 'image-to-video' && images + videos < 1) throw omniError('OMNI_UNSUPPORTED_INPUT', 'image-to-video requires at least one input asset');
+  if (images > constraints.maxImages) throw validationError(`Omni input images exceed maximum of ${constraints.maxImages}`);
+  if (videos > constraints.maxVideos) throw validationError(`Omni input videos exceed maximum of ${constraints.maxVideos}`);
+  if (opts.task === 'image-to-video' && images + videos < 1) throw validationError('image-to-video requires at least one input asset');
   return true;
 }
 
@@ -221,7 +231,7 @@ async function resolveInputAssets(inputs, getAsset) {
 function buildOmniVideoArgs(opts) {
   if (!opts || typeof opts !== 'object') throw new Error('buildOmniVideoArgs requires an options object');
   if (!MODEL_ALIAS[opts.modelId]) throw new Error(`unsupported Omni video model: ${opts.modelId}`);
-  if (typeof opts.prompt !== 'string') throw new Error('prompt is required');
+  if (typeof opts.prompt !== 'string') throw validationError('prompt is required');
   if (!opts.outputPath || typeof opts.outputPath !== 'string') throw new Error('outputPath is required');
 
   const inputPaths = Array.isArray(opts.inputPaths) ? opts.inputPaths : [];
@@ -235,11 +245,11 @@ function buildOmniVideoArgs(opts) {
   const parameters = opts.parameters || {};
   const argv = [
     OMNI_VIDEO_SCRIPT,
-    '--prompt', opts.prompt,
     '--duration', String(getDuration(parameters)),
     '--aspect-ratio', getAspectRatio(parameters),
     '--output', opts.outputPath,
   ];
+  if (opts.prompt.trim()) argv.splice(1, 0, '--prompt', opts.prompt);
   if (parameters.temperature != null) argv.push('--temperature', String(parameters.temperature));
   if (parameters.topP != null) argv.push('--top-p', String(parameters.topP));
   for (const file of inputPaths) {

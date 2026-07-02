@@ -21,6 +21,7 @@ const TERMINAL_NATIVE_STATUSES = new Set([
   'interrupted_process',
   'outcome_unknown',
   'asset_unavailable',
+  'asset_deleted',
   'unavailable',
 ]);
 
@@ -44,11 +45,7 @@ const ALLOWED_UPLOAD_MIME = new Set([
   'image/jpeg',
   'image/jpg',
   'image/webp',
-  'image/gif',
-  'image/avif',
   'video/mp4',
-  'video/webm',
-  'video/quicktime',
 ]);
 
 const ALLOWED_INPUT_ROLES = new Set([
@@ -189,7 +186,7 @@ export function buildNativeRequest(opts = {}) {
   const parameters = applyNativeModelParameterSupport(model, sanitizeParameters(opts.parameters));
   const inputs = sanitizeInputs(opts.inputs);
   validateNativeVideoConstraints(modelId, parameters, inputs);
-  return {
+  const req = {
     modelId,
     task,
     prompt,
@@ -197,6 +194,8 @@ export function buildNativeRequest(opts = {}) {
     inputs,
     clientRequestId: opts.clientRequestId || generateId('req'),
   };
+  if (opts.displayName !== undefined) req.displayName = String(opts.displayName);
+  return req;
 }
 
 export const buildNativeGenerationRequest = buildNativeRequest;
@@ -222,6 +221,7 @@ export function normalizeNativeResult(raw = {}, ctx = {}) {
     native: true,
     model: raw.model || job.modelId,
     request_id: raw.request_id || raw.requestId || raw.id || job.id,
+    displayName: raw.displayName || raw.downloadName || raw.filename || job.displayName || job.downloadName || job.filename || undefined,
   };
 
   if (!completed) {
@@ -346,6 +346,50 @@ export async function deleteNativeLibraryItem(jobId) {
   }
 }
 
+export async function renameNativeLibraryItem(jobId, displayName) {
+  const res = await fetch(`${NATIVE_LIBRARY_ENDPOINT}/${encodeURIComponent(jobId)}`,
+    { method:'PATCH', headers: buildNativeHeaders(),
+      body: JSON.stringify({ displayName }) });
+  if (!res.ok) throw new Error(`Rename failed (${res.status})`);
+  return res.json();
+}
+
+function filenameFromContentDisposition(header) {
+  const value = String(header || '');
+  const utf8 = value.match(/filename\*=UTF-8''([^;]+)/i);
+  if (utf8?.[1]) return decodeURIComponent(utf8[1].replace(/^"|"$/g, ''));
+  const plain = value.match(/filename="?([^";]+)"?/i);
+  return plain?.[1] || '';
+}
+
+export async function downloadNativeLibraryLastFrame(jobId) {
+  if (!jobId) throw new Error('downloadNativeLibraryLastFrame requires a job id');
+  const res = await fetch(`${NATIVE_LIBRARY_ENDPOINT}/${encodeURIComponent(jobId)}/last-frame`, {
+    method: 'POST',
+    headers: { Accept: 'image/png' },
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => '');
+    throw new Error(`Native last-frame download failed: ${res.status} ${res.statusText} ${detail.slice(0, 120)}`);
+  }
+
+  const blob = await res.blob();
+  const filename =
+    filenameFromContentDisposition(res.headers?.get?.('content-disposition')) || `last-frame-${jobId}.png`;
+  const blobUrl = URL.createObjectURL(blob);
+  try {
+    const a = document.createElement('a');
+    a.href = blobUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  } finally {
+    URL.revokeObjectURL(blobUrl);
+  }
+  return { filename };
+}
+
 export async function copyPromptToClipboard(text) {
   const value = text || '';
   try {
@@ -396,7 +440,7 @@ function assertCompletedNativeResult(result) {
   throw new Error('Native generation ended with ASSET_UNAVAILABLE: completed job returned no same-origin asset URL');
 }
 
-async function pollNativeGeneration(jobId, ctx, opts = {}) {
+export async function pollNativeGeneration(jobId, ctx = {}, opts = {}) {
   const intervalMs = Number.isFinite(Number(opts.pollIntervalMs))
     ? Math.max(0, Number(opts.pollIntervalMs))
     : NATIVE_POLL_INTERVAL_MS;
@@ -441,6 +485,7 @@ export async function generateNativeMedia(opts = {}) {
     if (PENDING_NATIVE_STATUSES.has(status)) {
       const jobId = data.id || data.request_id || data.requestId || result.request_id;
       if (!jobId) throw new Error('Native generation is pending but returned no job id to poll');
+      opts.onSubmitted?.({ id: jobId, modelId: req.modelId });
       return pollNativeGeneration(jobId, { job }, opts);
     }
     if (status === 'completed') return assertCompletedNativeResult(result);

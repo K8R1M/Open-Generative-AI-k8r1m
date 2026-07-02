@@ -156,7 +156,7 @@ test('buildVertexVideoArgs: maps Veo aliases and includes --no-audio only for au
   assert.ok(!omitted.includes('--no-audio'));
 });
 
-test('buildVertexVideoArgs: I2V start, last frame, and references preserve order', () => {
+test('buildVertexVideoArgs: I2V frame mode and reference mode preserve order', () => {
   const argv = vertex.buildVertexVideoArgs({
     modelId: 'native.vertex.veo-3.1',
     task: 'image-to-video',
@@ -165,16 +165,27 @@ test('buildVertexVideoArgs: I2V start, last frame, and references preserve order
     outputPath: '/o.mp4',
     inputPaths: [
       { role: 'start', path: '/start.png' },
-      { role: 'reference', path: '/ref-a.png' },
       { role: 'last', path: '/end.png' },
-      { role: 'reference', path: '/ref-b.png' },
     ],
   });
   assert.equal(argv[argv.indexOf('--input-image') + 1], '/start.png');
   assert.equal(argv[argv.indexOf('--last-frame') + 1], '/end.png');
+  assert.equal(argv.includes('--reference-image'), false);
+
+  const refs = vertex.buildVertexVideoArgs({
+    modelId: 'native.vertex.veo-3.1',
+    task: 'image-to-video',
+    prompt: 'animate',
+    parameters: { durationSeconds: 8, aspectRatio: '16:9', resolution: '1080p' },
+    outputPath: '/o.mp4',
+    inputPaths: [
+      { role: 'reference', path: '/ref-a.png' },
+      { role: 'reference', path: '/ref-b.png' },
+    ],
+  });
   const refIdxs = [];
-  for (let i = 0; i < argv.length; i++) if (argv[i] === '--reference-image') refIdxs.push(i);
-  assert.deepEqual(refIdxs.map((i) => argv[i + 1]), ['/ref-a.png', '/ref-b.png']);
+  for (let i = 0; i < refs.length; i++) if (refs[i] === '--reference-image') refIdxs.push(i);
+  assert.deepEqual(refIdxs.map((i) => refs[i + 1]), ['/ref-a.png', '/ref-b.png']);
 });
 
 test('buildVertexVideoArgs: rejects unsupported model, task, duration, and last frame without start', () => {
@@ -458,9 +469,7 @@ test('parseMediaStdout: extracts the MEDIA output path', () => {
   assert.equal(vertex.parseMediaStdout('no media line'), null);
 });
 
-test('runVertexVideoProvider: I2V resolves start/end/reference assets and scheduler verifies MP4', async () => {
-  const start = await uploadAsset(PNG_1X1, 'image/png');
-  const end = await uploadAsset(JPEG_MIN, 'image/jpeg');
+test('runVertexVideoProvider: I2V reference assets resolve and scheduler verifies MP4', async () => {
   const ref = await uploadAsset(PNG_1X1, 'image/png');
   const rid = 'c6-i2v-' + Date.now();
   let argvSeen;
@@ -477,8 +486,6 @@ test('runVertexVideoProvider: I2V resolves start/end/reference assets and schedu
       prompt: 'animate',
       parameters: { durationSeconds: 8, aspectRatio: '16:9', resolution: '1080p' },
       inputs: [
-        { kind: 'asset', assetId: start.assetId, role: 'first-frame' },
-        { kind: 'asset', assetId: end.assetId, role: 'last-frame' },
         { kind: 'asset', assetId: ref.assetId, role: 'reference' },
       ],
     },
@@ -502,8 +509,8 @@ test('runVertexVideoProvider: I2V resolves start/end/reference assets and schedu
   );
   await waitFor(() => settled.length > 0, { timeoutMs: 2000 });
   assert.equal(settled[0].status, 'completed');
-  assert.equal(argvSeen[argvSeen.indexOf('--input-image') + 1], start.path);
-  assert.equal(argvSeen[argvSeen.indexOf('--last-frame') + 1], end.path);
+  assert.equal(argvSeen.includes('--input-image'), false);
+  assert.equal(argvSeen.includes('--last-frame'), false);
   assert.equal(argvSeen[argvSeen.indexOf('--reference-image') + 1], ref.path);
 });
 

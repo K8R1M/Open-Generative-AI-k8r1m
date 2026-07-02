@@ -115,11 +115,18 @@ function getDuration(parameters) {
   return Number(parameters.durationSeconds ?? parameters.duration);
 }
 
+function validationError(message) {
+  const error = new Error(message);
+  error.nativeMediaStatus = 400;
+  error.nativeMediaBody = { error: 'BAD_REQUEST', message };
+  return error;
+}
+
 function buildVertexVideoArgs(opts) {
   if (!opts || typeof opts !== 'object') throw new Error('buildVertexVideoArgs requires an options object');
   const alias = MODEL_ALIAS[opts.modelId];
   if (!alias) throw new Error(`unsupported Vertex video model: ${opts.modelId}`);
-  if (typeof opts.prompt !== 'string') throw new Error('prompt is required');
+  if (typeof opts.prompt !== 'string') throw validationError('prompt is required');
   if (!opts.outputPath || typeof opts.outputPath !== 'string') throw new Error('outputPath is required');
   if (opts.task !== 'text-to-video' && opts.task !== 'image-to-video') {
     throw new Error(`unsupported Vertex video task: ${opts.task}`);
@@ -134,7 +141,7 @@ function buildVertexVideoArgs(opts) {
   if (resolution != null && !CONSTRAINTS.resolutions.has(String(resolution))) throw new Error(`unsupported Veo resolution: ${resolution}`);
 
   const argv = [VERTEX_VIDEO_SCRIPT];
-  argv.push('--prompt', opts.prompt);
+  if (opts.prompt.trim()) argv.push('--prompt', opts.prompt);
   argv.push('--model', alias);
   argv.push('--duration', String(duration));
   if (aspect != null) argv.push('--aspect-ratio', String(aspect));
@@ -166,6 +173,12 @@ function buildVertexVideoArgs(opts) {
     throw new Error(`Veo last frame requires ${CONSTRAINTS.referenceDurationSeconds}s duration`);
   }
   if (referenceCount > CONSTRAINTS.maxReferences) throw new Error(`Veo reference images exceed maximum of ${CONSTRAINTS.maxReferences}`);
+  if (referenceCount > 0 && (startUsed || lastUsed)) {
+    throw validationError('Veo reference images cannot be combined with a first or last frame');
+  }
+  if (referenceCount > 0 && String(aspect || '16:9') !== '16:9') {
+    throw validationError('Veo reference images require 16:9 aspect ratio');
+  }
   if (referenceCount > 0 && duration !== CONSTRAINTS.referenceDurationSeconds) {
     throw new Error(`Veo reference images require ${CONSTRAINTS.referenceDurationSeconds}s duration`);
   }
@@ -179,49 +192,56 @@ async function validateVertexVideoInputs(opts) {
   const resolved = Array.isArray(opts.resolvedFiles) ? opts.resolvedFiles : [];
 
   if (resolved.length !== inputs.length) {
-    throw new Error('input resolution mismatch: every input must resolve to a local asset');
+    throw validationError('input resolution mismatch: every input must resolve to a local asset');
   }
 
   let startCount = 0;
   let lastCount = 0;
   let referenceCount = 0;
   for (const input of inputs) {
-    if (!input || typeof input !== 'object') throw new Error('invalid input entry');
+    if (!input || typeof input !== 'object') throw validationError('invalid input entry');
     if (input.kind !== 'asset') {
-      throw new Error('Vertex video inputs must be native asset references (external URLs are forbidden)');
+      throw validationError('Vertex video inputs must be native asset references');
     }
-    if (!input.assetId) throw new Error('Vertex video input is missing an assetId');
-    if (!ALLOWED_ROLES.has(input.role)) throw new Error(`unsupported Vertex video input role: ${input.role}`);
+    if (!input.assetId) throw validationError('Vertex video input is missing an assetId');
+    if (!ALLOWED_ROLES.has(input.role)) throw validationError(`unsupported Vertex video input role: ${input.role}`);
     if (START_ROLES.has(input.role)) startCount += 1;
     else if (LAST_ROLES.has(input.role)) lastCount += 1;
     else if (REFERENCE_ROLES.has(input.role)) referenceCount += 1;
   }
 
-  if (startCount > 1) throw new Error('Veo supports at most one start frame');
-  if (lastCount > 1) throw new Error('Veo supports at most one last frame');
-  if (lastCount > 0 && startCount === 0) throw new Error('Veo last frame requires a start frame');
+  if (startCount > 1) throw validationError('Veo supports at most one start frame');
+  if (lastCount > 1) throw validationError('Veo supports at most one last frame');
+  if (lastCount > 0 && startCount === 0) throw validationError('Veo last frame requires a start frame');
+  if (referenceCount > 0 && (startCount > 0 || lastCount > 0)) {
+    throw validationError('Veo reference images cannot be combined with a first or last frame');
+  }
+  const aspect = (opts.parameters || {}).aspectRatio ?? (opts.parameters || {}).aspect_ratio;
+  if (referenceCount > 0 && String(aspect || '16:9') !== '16:9') {
+    throw validationError('Veo reference images require 16:9 aspect ratio');
+  }
   const duration = getDuration(opts.parameters || {});
   if (lastCount > 0 && duration !== constraints.referenceDurationSeconds) {
-    throw new Error(`Veo last frame requires ${constraints.referenceDurationSeconds}s duration`);
+    throw validationError(`Veo last frame requires ${constraints.referenceDurationSeconds}s duration`);
   }
   if (referenceCount > constraints.maxReferences) {
-    throw new Error(`Veo reference images exceed maximum of ${constraints.maxReferences} (got ${referenceCount})`);
+    throw validationError(`Veo reference images exceed maximum of ${constraints.maxReferences} (got ${referenceCount})`);
   }
   if (referenceCount > 0 && duration !== constraints.referenceDurationSeconds) {
-    throw new Error(`Veo reference images require ${constraints.referenceDurationSeconds}s duration`);
+    throw validationError(`Veo reference images require ${constraints.referenceDurationSeconds}s duration`);
   }
   if (opts.task === 'image-to-video' && startCount === 0 && referenceCount === 0) {
-    throw new Error('image-to-video requires at least one input image');
+    throw validationError('image-to-video requires at least one input image');
   }
 
   for (const file of resolved) {
-    if (!file || !file.path) throw new Error('resolved input is missing a local path');
+    if (!file || !file.path) throw validationError('resolved input is missing a local path');
     const mime = file.mime;
     if (!constraints.supportedInputMime.has(mime)) {
-      throw new Error(`unsupported Vertex video input MIME type: ${mime || 'unknown'}`);
+      throw validationError(`unsupported Vertex video input MIME type: ${mime || 'unknown'}`);
     }
     if (typeof file.size === 'number' && file.size > constraints.inputMaxBytes) {
-      throw new Error(`Vertex video input exceeds max bytes (${constraints.inputMaxBytes}): ${file.path}`);
+      throw validationError(`Vertex video input exceeds max bytes (${constraints.inputMaxBytes})`);
     }
   }
 

@@ -5,6 +5,36 @@ Branch: `feature/omni-v1-native-media`.
 Test port: `19400`.
 Production target after merge: systemd app on `19300`.
 
+## Current Execution Status Overlay
+
+Done / merged to local `main`:
+
+- Phase 0 guardrails and runtime/worktree checks.
+- Phase 1 Gemini Omni provider, real live gate, fail-closed behavior, scheduler cap, model registration, safe public errors, and no fake user-facing success.
+- Prompt hydration fix after refresh.
+- Omni generated-card resolution display fix (`720p`).
+- Completed Omni test media preserved in shared `.native-media`.
+
+Done on `feature/omni-v1-adjacent-controls`:
+
+- Phase 2 batch delete.
+- Phase 3 last-frame download.
+- Phase 4 generated-image-to-Image-Studio reference action.
+- Phase 5 automatic display/download naming metadata.
+
+Not done / not accepted:
+
+- Phase 4 generated-image-to-Video-Studio reference action still fails in Karim's live `19400` test after an attempted fix and restart.
+- Phase 5 visible naming input/control was not implemented; current behavior is automatic metadata only.
+- Editable rename UI was not implemented.
+
+Current merge status:
+
+- Do not merge `feature/omni-v1-adjacent-controls` into `main` until the broken Video Studio action is fixed and verified, or explicitly disabled/removed before merge.
+- Fable should inspect both worktrees instead of requiring a merge first:
+  - clean main: `/home/k8r1m/Open-Generative-AI-main-19300`
+  - feature WIP: `/home/k8r1m/Open-Generative-AI`
+
 ## Goal
 
 Add Gemini Omni as a native video provider through the existing native media gateway, then add only the low-complexity adjacent controls Karim chose for this first branch.

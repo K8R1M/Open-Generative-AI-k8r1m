@@ -1,0 +1,260 @@
+{
+  "schemaVersion": 1,
+  "project": {
+    "id": "proj_example",
+    "title": "Example Short Film",
+    "description": "Metadata-only storyboard project; no media files copied.",
+    "aspectRatio": "16:9",
+    "styleBible": "Cinematic realism, orange-teal dusk, handheld documentary energy.",
+    "sceneOrder": [
+      "scene_001"
+    ],
+    "referenceCollectionIds": [
+      "ref_maya",
+      "ref_rooftop"
+    ],
+    "promptTemplateIds": [
+      "tmpl_cinematic_video_shot"
+    ],
+    "createdAt": "2026-07-01T00:00:00.000Z",
+    "updatedAt": "2026-07-01T00:00:00.000Z"
+  },
+  "scenes": {
+    "scene_001": {
+      "id": "scene_001",
+      "projectId": "proj_example",
+      "title": "Rooftop reveal",
+      "summary": "Maya steps onto the rooftop and sees the city wake up.",
+      "beat": "Discovery",
+      "order": 1,
+      "shotIds": [
+        "shot_001",
+        "shot_002"
+      ],
+      "characterIds": [
+        "char_maya"
+      ],
+      "locationIds": [
+        "loc_rooftop"
+      ]
+    }
+  },
+  "shots": {
+    "shot_001": {
+      "id": "shot_001",
+      "sceneId": "scene_001",
+      "index": 1,
+      "title": "Maya enters rooftop",
+      "beat": "She opens the door and walks into sunrise.",
+      "prompt": "@maya walks into @rooftop at sunrise, cinematic realism.",
+      "negativePrompt": "distorted face, bad hands, text artifacts",
+      "durationSec": 5,
+      "aspectRatio": "16:9",
+      "modelPreference": "existing-video-model-id",
+      "camera": {
+        "move": "slow dolly in",
+        "lens": "35mm",
+        "focalLengthMm": 35,
+        "aperture": "f/2.8",
+        "framing": "medium wide",
+        "style": "handheld cinematic"
+      },
+      "referenceIds": [
+        "ref_maya",
+        "ref_rooftop"
+      ],
+      "firstFrameRef": null,
+      "lastFrameRef": "refasset_lastframe_001",
+      "variantIds": [
+        "var_001"
+      ],
+      "status": "generated"
+    },
+    "shot_002": {
+      "id": "shot_002",
+      "sceneId": "scene_001",
+      "index": 2,
+      "title": "City reveal",
+      "beat": "Camera moves from Maya to the skyline.",
+      "prompt": "Continue from previous frame. @maya looks over @rooftop toward sunrise skyline.",
+      "negativePrompt": "jump cut, changed outfit, changed location",
+      "durationSec": 5,
+      "aspectRatio": "16:9",
+      "modelPreference": "existing-video-model-id",
+      "camera": {
+        "move": "pan right to skyline",
+        "lens": "50mm",
+        "focalLengthMm": 50,
+        "aperture": "f/4",
+        "framing": "over shoulder",
+        "style": "smooth cinematic"
+      },
+      "referenceIds": [
+        "ref_maya",
+        "ref_rooftop"
+      ],
+      "firstFrameRef": "refasset_lastframe_001",
+      "lastFrameRef": null,
+      "variantIds": [],
+      "status": "draft"
+    }
+  },
+  "referenceCollections": {
+    "ref_maya": {
+      "id": "ref_maya",
+      "projectId": "proj_example",
+      "type": "character",
+      "name": "Maya",
+      "tag": "@maya",
+      "assetIds": [
+        "refasset_maya_primary"
+      ],
+      "notes": "Hero character. Keep red jacket and short black bob."
+    },
+    "ref_rooftop": {
+      "id": "ref_rooftop",
+      "projectId": "proj_example",
+      "type": "location",
+      "name": "Rooftop",
+      "tag": "@rooftop",
+      "assetIds": [
+        "refasset_rooftop_wide"
+      ],
+      "notes": "Concrete rooftop, steel railing, water tower, sunrise from camera-right."
+    }
+  },
+  "referenceAssets": {
+    "refasset_maya_primary": {
+      "id": "refasset_maya_primary",
+      "collectionId": "ref_maya",
+      "role": "primary_identity",
+      "assetRef": {
+        "kind": "nativeUpload",
+        "uploadId": "upload_maya_front",
+        "relativePath": ".native-media/uploads/maya_front.png",
+        "mediaType": "image",
+        "mimeType": "image/png"
+      },
+      "qualityNotes": "Front-facing clean portrait.",
+      "rights": "User-owned / cleared"
+    },
+    "refasset_rooftop_wide": {
+      "id": "refasset_rooftop_wide",
+      "collectionId": "ref_rooftop",
+      "role": "location_wide",
+      "assetRef": {
+        "kind": "nativeAsset",
+        "jobId": "job_rooftop_image",
+        "assetId": "asset_rooftop_image",
+        "relativePath": ".native-media/assets/job_rooftop_image/output.png",
+        "mediaType": "image",
+        "mimeType": "image/png"
+      },
+      "qualityNotes": "Best establishing shot.",
+      "rights": "Generated in project"
+    },
+    "refasset_lastframe_001": {
+      "id": "refasset_lastframe_001",
+      "collectionId": null,
+      "role": "last_frame",
+      "assetRef": {
+        "kind": "nativeAsset",
+        "jobId": "job_shot_001_video",
+        "assetId": "asset_shot_001_last_frame",
+        "relativePath": ".native-media/assets/job_shot_001_video/last-frame.png",
+        "mediaType": "image",
+        "mimeType": "image/png"
+      },
+      "qualityNotes": "Extracted last frame from shot_001.",
+      "rights": "Generated in project"
+    }
+  },
+  "characterBibles": {
+    "char_maya": {
+      "id": "char_maya",
+      "collectionId": "ref_maya",
+      "name": "Maya",
+      "tag": "@maya",
+      "description": "Curious 28-year-old documentary filmmaker.",
+      "appearance": "Short black bob haircut, brown eyes, red cropped jacket, black boots.",
+      "wardrobe": "Red jacket is mandatory in this sequence.",
+      "personality": "Focused, observant, quietly intense.",
+      "doNotChange": [
+        "hair length",
+        "red jacket",
+        "eye color"
+      ],
+      "promptSnippet": "Maya, same woman as reference, short black bob, red jacket, expressive eyes",
+      "referenceAssetIds": [
+        "refasset_maya_primary"
+      ]
+    }
+  },
+  "locations": {
+    "loc_rooftop": {
+      "id": "loc_rooftop",
+      "collectionId": "ref_rooftop",
+      "name": "Rooftop",
+      "tag": "@rooftop",
+      "description": "Concrete rooftop overlooking dense city skyline at sunrise.",
+      "continuityNotes": "Keep steel railing, water tower, and sunrise direction consistent.",
+      "promptSnippet": "same rooftop location, concrete floor, steel railing, city skyline, sunrise"
+    }
+  },
+  "promptTemplates": {
+    "tmpl_cinematic_video_shot": {
+      "id": "tmpl_cinematic_video_shot",
+      "name": "Cinematic video shot",
+      "scope": "shot",
+      "version": 1,
+      "template": "{{subject}} in {{location}}. {{action}}. Camera: {{camera.move}}, {{camera.lens}}, {{camera.framing}}. Style: {{styleBible}}.",
+      "variables": [
+        "subject",
+        "location",
+        "action",
+        "camera",
+        "styleBible"
+      ]
+    }
+  },
+  "variants": {
+    "var_001": {
+      "id": "var_001",
+      "shotId": "shot_001",
+      "modelId": "existing-video-model-id",
+      "provider": "existing-provider",
+      "promptSnapshot": "Maya, same woman as reference, short black bob, red jacket, walks into same rooftop location at sunrise...",
+      "settingsSnapshot": {
+        "durationSec": 5,
+        "aspectRatio": "16:9",
+        "camera": {
+          "move": "slow dolly in",
+          "lens": "35mm"
+        }
+      },
+      "referenceSnapshots": [
+        "ref_maya",
+        "ref_rooftop"
+      ],
+      "jobLinkId": "joblink_001",
+      "assetRefs": [
+        "assetref_variant_output_001"
+      ],
+      "status": "succeeded",
+      "rating": 4,
+      "notes": "Good identity and lighting."
+    }
+  },
+  "generationJobLinks": {
+    "joblink_001": {
+      "id": "joblink_001",
+      "jobId": "job_shot_001_video",
+      "assetId": "asset_shot_001_video",
+      "provider": "existing-provider",
+      "modelId": "existing-video-model-id",
+      "sourceStudio": "VideoStudio",
+      "nativeJobPath": ".native-media/jobs.json",
+      "createdAt": "2026-07-01T00:00:00.000Z"
+    }
+  }
+}

@@ -149,6 +149,31 @@ test('startup reconciliation: a queued record with no id is settled by store key
   assert.equal(scheduler.isTracked(undefined), false, 'malformed queued startup record must not spawn provider work');
 });
 
+test('startup reconciliation: an asset_deleted tombstone stays tombstoned', async () => {
+  const id = 'startup-asset-deleted-' + Date.now();
+  const deletedAt = new Date().toISOString();
+  await writeJobs({
+    [id]: {
+      id,
+      request_id: id,
+      status: 'asset_deleted',
+      assetDeleted: true,
+      deletedAt,
+      assetDeletedAt: deletedAt,
+      modelId: 'native.vertex.nano-banana-2',
+      provider: 'vertex',
+      native: true,
+    },
+  });
+  const counts = await gateway.reconcileOnRestart();
+  const settled = await gateway.getGeneration(id);
+  assert.equal(counts.unchanged, 1);
+  assert.equal(settled.status, 'asset_deleted');
+  assert.equal(settled.assetDeleted, true);
+  assert.equal(settled.deletedAt, deletedAt);
+  assert.equal(scheduler.isTracked(id), false, 'tombstone reconcile must not spawn provider work');
+});
+
 test('startup reconciliation: a missing-status legacy record is settled by store key', async () => {
   const key = 'startup-legacy-no-status-' + Date.now();
   await writeJobs({

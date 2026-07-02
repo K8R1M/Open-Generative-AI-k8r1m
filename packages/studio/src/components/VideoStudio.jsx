@@ -1,7 +1,9 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Copy, Trash2 } from "lucide-react";
+import { Copy, Download, Pencil, Trash2 } from "lucide-react";
+import toast, { Toaster } from "react-hot-toast";
+import LazyVideo from "./LazyVideo.jsx";
 import { generateVideo, generateI2V, processV2V, uploadFile } from "../muapi.js";
 import {
   t2vModels,
@@ -21,23 +23,32 @@ import {
 import {
   NATIVE_MODELS,
   NATIVE_ASSET_URL_PREFIX,
+  NATIVE_VEO_REFERENCE_IMAGES_ENABLED,
   isNativeModelId,
   nativeModelById,
 } from "../nativeModels.js";
-import { copyPromptToClipboard, deleteNativeLibraryItem, generateNativeMedia, listNativeLibrary, uploadNativeFile } from "../nativeMedia.js";
+import {
+  copyPromptToClipboard,
+  deleteNativeLibraryItem,
+  downloadNativeLibraryLastFrame,
+  generateNativeMedia,
+  isSameOriginAssetUrl,
+  listNativeLibrary,
+  renameNativeLibraryItem,
+  uploadNativeFile,
+} from "../nativeMedia.js";
+import { nativeGenerationRegistry } from "../generationRegistry.js";
+import {
+  historyKeys,
+  nativeVideoCardResolution,
+  normalizeVideoServerHistoryEntry as normalizeServerHistoryEntry,
+  sameHistoryEntry,
+} from "../studioHistory.js";
 
 // ── tiny helpers ──────────────────────────────────────────────────────────────
 
 const NATIVE_GROK_IMAGINE_VIDEO_ID = "native.grok.imagine-video";
-const OMNI_VIDEO_DISPLAY_RESOLUTION = "720p";
-
-function nativeVideoCardResolution(modelOrId, selectedResolution) {
-  const model = typeof modelOrId === "string" ? nativeModelById(modelOrId) : modelOrId;
-  if (model?.provider === "omni" && Array.isArray(model.resolutions) && model.resolutions.length === 0) {
-    return OMNI_VIDEO_DISPLAY_RESOLUTION;
-  }
-  return selectedResolution;
-}
+const GENERATED_IMAGE_TO_VIDEO_STUDIO_KEY = "nativeGeneratedImageReference:video";
 
 function nativeVideoModelToDescriptor(m) {
   const aspectRatios = m.supportsAspectRatio === false ? [] : (m.aspectRatios || ["16:9"]);
@@ -131,6 +142,10 @@ function getMaxImagesForI2VNative(modelId) {
   return getMaxImagesForI2VModel(modelId);
 }
 
+function modelSupportsImageToVideo(model) {
+  return model?.kind === "video" && model.tasks?.includes("image-to-video");
+}
+
 function nativeVideoReferencesEnabled(model) {
   return model?.id === NATIVE_GROK_IMAGINE_VIDEO_ID || Number(model?.maxReferenceImages || 0) > 0;
 }
@@ -145,6 +160,70 @@ function shouldUseNativeImageUpload(modelId) {
     model?.id === NATIVE_GROK_IMAGINE_VIDEO_ID ||
     (model?.kind === "video" && model.tasks?.includes("image-to-video"))
   );
+}
+
+function shouldUseNativeVideoUpload(modelId) {
+  const model = nativeModelById(modelId);
+  return model?.kind === "video" && model.provider === "omni" && Number(model.omniMaxVideos || 0) > 0;
+}
+
+function isVeoReferenceModel(model) {
+  return model?.provider === "vertex" && model.referenceImagesEnabled && NATIVE_VEO_REFERENCE_IMAGES_ENABLED;
+}
+
+function getMaxImagesForVideoInputMode(modelId, mode = "frames") {
+  const model = nativeModelById(modelId);
+  if (isVeoReferenceModel(model)) return mode === "references" ? 3 : 1;
+  return getMaxImagesForI2VNative(modelId);
+}
+
+function baseDisplayName(name) {
+  return (name || "").trim().slice(0, 110);
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function initialNextDisplayName(base, history) {
+  const pattern = new RegExp(`^${escapeRegExp(base)}(?:-(\\d{3}))?$`);
+  let max = 0;
+  for (const entry of Array.isArray(history) ? history : []) {
+    const match = typeof entry?.displayName === "string" ? entry.displayName.match(pattern) : null;
+    if (match) max = Math.max(max, match[1] ? Number(match[1]) : 0);
+  }
+  return Math.max(1, max + 1);
+}
+
+function nextDisplayNameForSubmit(rawName, nameSequence, history) {
+  const base = baseDisplayName(rawName);
+  if (!base) return { displayName: undefined, nextSequence: nameSequence };
+  if (nameSequence?.base !== base) {
+    return { displayName: base, nextSequence: { base, next: initialNextDisplayName(base, history) } };
+  }
+  return {
+    displayName: `${base}-${String(Math.max(1, nameSequence.next || 1)).padStart(3, "0")}`,
+    nextSequence: { base, next: Math.max(1, nameSequence.next || 1) + 1 },
+  };
+}
+
+export function planReferenceHandoff({ urls, currentModelId, capabilitiesLookup = nativeModelById } = {}) {
+  const cleanUrls = Array.from(new Set((Array.isArray(urls) ? urls : []).filter(isSameOriginAssetUrl)));
+  const warnings = [];
+  if (cleanUrls.length === 0) return { warnings: ["no-usable-urls"] };
+
+  const model = capabilitiesLookup(currentModelId);
+  const capacity = getMaxImagesForVideoInputMode(currentModelId, "frames");
+  const kept = Math.max(1, capacity);
+  if (cleanUrls.length > kept) warnings.push(`kept:${kept}-of-${cleanUrls.length}`);
+
+  return {
+    modelId: currentModelId,
+    modelName: model?.label || model?.name || currentModelId,
+    imageMode: true,
+    urls: cleanUrls.slice(0, kept),
+    warnings,
+  };
 }
 
 async function uploadVideoStudioImage(modelId, apiKey, file, onProgress) {
@@ -181,6 +260,10 @@ function getQualitiesForModel(modelList, modelId) {
   return model?.inputs?.quality?.enum || [];
 }
 
+function videoDownloadName(entry, idx) {
+  return `${entry?.displayName || entry?.downloadName || `video-${entry?.id || idx}`}.mp4`;
+}
+
 async function downloadFile(url, filename) {
   try {
     const response = await fetch(url);
@@ -198,31 +281,16 @@ async function downloadFile(url, filename) {
   }
 }
 
-function normalizeServerHistoryEntry(item) {
-  const url = item?.url || item?.outputs?.[0];
-  if (!url) return null;
-  const params = item.parameters || {};
-  return {
-    id: item.jobId || item.id,
-    jobId: item.jobId || item.id,
-    url,
-    prompt: item.prompt || "",
-    model: item.modelId || item.model,
-    aspect_ratio: item.aspectRatio || item.aspect_ratio || params.aspectRatio || params.aspect_ratio,
-    duration: item.duration || item.durationSeconds || params.duration || params.durationSeconds,
-    resolution: nativeVideoCardResolution(item.modelId || item.model, item.resolution || params.resolution),
-    timestamp: item.createdAt || item.completedAt || new Date().toISOString(),
-    native: true,
-    serverBacked: true,
-  };
+function nativeVideoJobId(entry) {
+  return entry?.jobId || entry?.request_id || (entry?.serverBacked ? entry?.id : null);
 }
 
-function historyKeys(entry) {
-  return [entry?.jobId, entry?.request_id, entry?.id, entry?.url].filter(Boolean);
+function canDownloadNativeLastFrame(entry) {
+  return Boolean(entry?.native && entry?.serverBacked && nativeVideoJobId(entry) && (entry.status || "completed") === "completed");
 }
 
-function sameHistoryEntry(a, b) {
-  return historyKeys(a).some((key) => historyKeys(b).includes(key));
+function isFailedHistoryEntry(entry) {
+  return String(entry?.status || "").toLowerCase() === "failed";
 }
 
 function mergeServerHistory(local, server) {
@@ -441,6 +509,7 @@ export default function VideoStudio({
   historyItems,
   droppedFiles,
   onFilesHandled,
+  referenceHandoffNonce,
 }) {
   const PERSIST_KEY = "hg_video_studio_persistent";
 
@@ -482,7 +551,6 @@ export default function VideoStudio({
   const [showAudio, setShowAudio] = useState(false);
 
   // ── uploads ──
-  const [uploadedImageUrl, setUploadedImageUrl] = useState(null);
   const [uploadedImageUrls, setUploadedImageUrls] = useState([]);
   const [imageUploading, setImageUploading] = useState(false);
   const [uploadedEndImageUrl, setUploadedEndImageUrl] = useState(null);
@@ -491,6 +559,9 @@ export default function VideoStudio({
   const [uploadedVideoUrl, setUploadedVideoUrl] = useState(null);
   const [videoUploading, setVideoUploading] = useState(false);
   const [uploadedVideoName, setUploadedVideoName] = useState(null);
+  const [videoUploadError, setVideoUploadError] = useState("");
+  const [veoInputMode, setVeoInputMode] = useState("frames");
+  const [refTrimNotice, setRefTrimNotice] = useState("");
 
   // ── generation / canvas ──
   const [generating, setGenerating] = useState(false);
@@ -505,12 +576,15 @@ export default function VideoStudio({
   // ── history ──
   const [localHistory, setLocalHistory] = useState([]);
   const [activeHistoryIdx, setActiveHistoryIdx] = useState(0);
+  const [lastFrameStatus, setLastFrameStatus] = useState("");
 
   // ── dropdown ──
   const [openDropdown, setOpenDropdown] = useState(null); // 'model'|'ar'|'duration'|'resolution'|'quality'|'mode'|null
 
   // ── prompt ──
   const [prompt, setPrompt] = useState("");
+  const [generationName, setGenerationName] = useState("");
+  const [nameSequence, setNameSequence] = useState({ base: "", next: 1 });
   const [promptDisabled, setPromptDisabled] = useState(false);
 
   // ── refs ──
@@ -522,9 +596,26 @@ export default function VideoStudio({
   const videoFileInputRef = useRef(null);
   const resultVideoRef = useRef(null);
   const hasRestored = useRef(false);
+  const selectedModelRef = useRef(defaultModel.id);
+  const registryHydratedRef = useRef(false);
+  const mountedRef = useRef(false);
 
   // ── derived data ──
   const history = historyItems ?? localHistory;
+  const uploadedImageUrl = uploadedImageUrls[0] ?? null;
+  const currentNativeModel = nativeModelById(selectedModel);
+  const veoReferencesMode = imageMode && isVeoReferenceModel(currentNativeModel) && veoInputMode === "references";
+
+  useEffect(() => {
+    if (!veoReferencesMode) return;
+    setSelectedDuration(8);
+    setSelectedAr("16:9");
+    setUploadedEndImageUrl(null);
+    if (uploadedImageUrls.length > 3) {
+      setRefTrimNotice(`Kept 3 of ${uploadedImageUrls.length} reference images — ${selectedModelName} accepts 3`);
+      setUploadedImageUrls(uploadedImageUrls.slice(0, 3));
+    }
+  }, [selectedModelName, uploadedImageUrls, veoReferencesMode]);
 
   const getCurrentModels = useCallback(() => {
     if (v2vMode) return v2vModels;
@@ -557,6 +648,10 @@ export default function VideoStudio({
     () => getCurrentModels().find((m) => m.id === selectedModel),
     [getCurrentModels, selectedModel],
   );
+
+  useEffect(() => {
+    selectedModelRef.current = selectedModel;
+  }, [selectedModel]);
 
   const isMotionControlSelection = useCallback(
     (modelId, isV2v) => {
@@ -648,54 +743,201 @@ export default function VideoStudio({
     [],
   );
 
+  const consumeGeneratedImageHandoff = useCallback(() => {
+    const raw = sessionStorage.getItem(GENERATED_IMAGE_TO_VIDEO_STUDIO_KEY);
+    if (!raw) return null;
+    sessionStorage.removeItem(GENERATED_IMAGE_TO_VIDEO_STUDIO_KEY);
+    try {
+      const payload = JSON.parse(raw);
+      if (payload?.source !== "generated-image") return { warnings: ["invalid-source"] };
+      return { urls: payload.urls, handoffId: payload.handoffId || null };
+    } catch (error) {
+      return { error };
+    }
+  }, []);
+
+  const reportHandoffFailure = useCallback((detail) => {
+    console.error("Failed to consume VideoStudio generated image handoff:", detail);
+    toast.error("Could not use that image in Video Studio.");
+  }, []);
+
+  // Pure: computes the merged URL list plus how many of the combined total
+  // (incoming handoff + whatever was already uploaded) survive the current
+  // model's capacity, so callers can warn on drops from EITHER source.
+  const mergeHandoffUrls = useCallback((handoffUrls, existingUrls, modelId) => {
+    const maxImages = Math.max(1, getMaxImagesForVideoInputMode(modelId, "frames"));
+    const merged = [
+      ...handoffUrls,
+      ...(Array.isArray(existingUrls) ? existingUrls : []).filter((url) => !handoffUrls.includes(url)),
+    ];
+    return { urls: merged.slice(0, maxImages), kept: Math.min(merged.length, maxImages), total: merged.length };
+  }, []);
+
+  const applyReferenceHandoffPlan = useCallback(
+    (plan) => {
+      if (!plan?.modelId || !Array.isArray(plan.urls) || plan.urls.length === 0) {
+        reportHandoffFailure(plan?.warnings || "no usable handoff urls");
+        return;
+      }
+      const merge = mergeHandoffUrls(plan.urls, uploadedImageUrls, plan.modelId);
+      setSelectedModel(plan.modelId);
+      setSelectedModelName(plan.modelName);
+      setImageMode(true);
+      setV2vMode(false);
+      setUploadedVideoUrl(null);
+      setUploadedVideoName(null);
+      setPromptDisabled(false);
+      setRefTrimNotice(
+        merge.total > merge.kept
+          ? `Kept ${merge.kept} of ${merge.total} reference images — ${plan.modelName} accepts ${merge.kept}`
+          : "",
+      );
+      setUploadedImageUrls(merge.urls);
+      applyControlsForModel(plan.modelId, true, false);
+    },
+    [applyControlsForModel, mergeHandoffUrls, reportHandoffFailure, uploadedImageUrls],
+  );
+
   // ── Persistence: Load ────────────────────────────────────────────────────
   useEffect(() => {
+    mountedRef.current = true;
+    if (hasRestored.current) {
+      return () => {
+        mountedRef.current = false;
+      };
+    }
     try {
-      let restoredHistory = [];
+      const restored = {
+        imageMode: false,
+        v2vMode: false,
+        selectedModel: defaultModel.id,
+        selectedModelName: defaultModel.name,
+        selectedAr: defaultModel.inputs?.aspect_ratio?.default || "16:9",
+        selectedDuration: defaultModel.inputs?.duration?.default || 5,
+        selectedResolution: defaultModel.inputs?.resolution?.default || "",
+        selectedQuality: defaultModel.inputs?.quality?.default || "",
+        selectedMode: "",
+        selectedEffect: "",
+        selectedAudio: true,
+        uploadedImageUrls: [],
+        uploadedVideoUrl: null,
+        uploadedVideoName: null,
+        prompt: "",
+        localHistory: [],
+        generationName: "",
+        nameSequence: { base: "", next: 1 },
+        veoInputMode: "frames",
+        refTrimNotice: "",
+      };
       const stored = localStorage.getItem(PERSIST_KEY);
       if (stored) {
         const data = JSON.parse(stored);
-        if (data.imageMode !== undefined) setImageMode(data.imageMode);
-        if (data.v2vMode !== undefined) setV2vMode(data.v2vMode);
-        if (data.selectedModel) setSelectedModel(data.selectedModel);
-        if (data.selectedModelName) setSelectedModelName(data.selectedModelName);
-        if (data.selectedAr) setSelectedAr(data.selectedAr);
-        if (data.selectedDuration) setSelectedDuration(data.selectedDuration);
-        if (data.selectedResolution) setSelectedResolution(data.selectedResolution);
-        if (data.selectedQuality) setSelectedQuality(data.selectedQuality);
-        if (data.selectedMode) setSelectedMode(data.selectedMode);
-        if (data.selectedEffect) setSelectedEffect(data.selectedEffect);
-        if (data.uploadedImageUrl) setUploadedImageUrl(data.uploadedImageUrl);
-        if (data.uploadedImageUrls) {
-          setUploadedImageUrls(data.uploadedImageUrls);
-        } else if (data.uploadedImageUrl) {
-          setUploadedImageUrls([data.uploadedImageUrl]);
-        }
-        if (data.uploadedVideoUrl) setUploadedVideoUrl(data.uploadedVideoUrl);
-        if (data.uploadedVideoName) setUploadedVideoName(data.uploadedVideoName);
-        if (data.prompt) setPrompt(data.prompt);
-        if (data.localHistory) {
-          restoredHistory = data.localHistory;
-          setLocalHistory(restoredHistory);
-        }
-
-        // Update control visibility based on restored model/mode
-        applyControlsForModel(
-          data.selectedModel || defaultModel.id,
-          !!data.imageMode,
-          !!data.v2vMode
-        );
-        if (data.selectedAudio !== undefined) setSelectedAudio(!!data.selectedAudio);
+        restored.imageMode = data.imageMode !== undefined ? !!data.imageMode : restored.imageMode;
+        restored.v2vMode = data.v2vMode !== undefined ? !!data.v2vMode : restored.v2vMode;
+        restored.selectedModel = data.selectedModel || restored.selectedModel;
+        restored.selectedModelName = data.selectedModelName || restored.selectedModelName;
+        restored.selectedAr = data.selectedAr || restored.selectedAr;
+        restored.selectedDuration = data.selectedDuration || restored.selectedDuration;
+        restored.selectedResolution = data.selectedResolution || restored.selectedResolution;
+        restored.selectedQuality = data.selectedQuality || restored.selectedQuality;
+        restored.selectedMode = data.selectedMode || restored.selectedMode;
+        restored.selectedEffect = data.selectedEffect || restored.selectedEffect;
+        restored.uploadedImageUrls = Array.isArray(data.uploadedImageUrls)
+          ? data.uploadedImageUrls
+          : data.uploadedImageUrl
+            ? [data.uploadedImageUrl]
+            : [];
+        restored.uploadedVideoUrl = data.uploadedVideoUrl || null;
+        restored.uploadedVideoName = data.uploadedVideoName || null;
+        restored.prompt = data.prompt || "";
+        restored.localHistory = Array.isArray(data.localHistory) ? data.localHistory : [];
+        restored.generationName = data.generationName || "";
+        restored.nameSequence = data.nameSequence || restored.nameSequence;
+        restored.veoInputMode = data.veoInputMode === "references" ? "references" : "frames";
+        restored.refTrimNotice = typeof data.refTrimNotice === "string" ? data.refTrimNotice : "";
+        restored.selectedAudio = data.selectedAudio !== undefined ? !!data.selectedAudio : restored.selectedAudio;
       }
+
+      const handoff = consumeGeneratedImageHandoff();
+      let handoffApplied = false;
+      if (handoff?.error) {
+        reportHandoffFailure(handoff.error);
+      } else if (handoff?.urls || handoff?.warnings) {
+        const plan = planReferenceHandoff({ urls: handoff.urls, currentModelId: restored.selectedModel });
+        if (plan.modelId) {
+          const merge = mergeHandoffUrls(plan.urls, restored.uploadedImageUrls, plan.modelId);
+          restored.selectedModel = plan.modelId;
+          restored.selectedModelName = plan.modelName;
+          restored.imageMode = true;
+          restored.v2vMode = false;
+          restored.uploadedVideoUrl = null;
+          restored.uploadedVideoName = null;
+          restored.uploadedImageUrls = merge.urls;
+          restored.refTrimNotice =
+            merge.total > merge.kept
+              ? `Kept ${merge.kept} of ${merge.total} reference images — ${plan.modelName} accepts ${merge.kept}`
+              : "";
+          handoffApplied = true;
+        } else {
+          reportHandoffFailure(plan.warnings);
+        }
+      }
+
+      if (handoffApplied) {
+        localStorage.setItem(PERSIST_KEY, JSON.stringify({
+          ...restored,
+          uploadedImageUrl: restored.uploadedImageUrls[0] ?? null,
+        }));
+      }
+
+      setImageMode(restored.imageMode);
+      setV2vMode(restored.v2vMode);
+      setSelectedModel(restored.selectedModel);
+      selectedModelRef.current = restored.selectedModel;
+      setSelectedModelName(restored.selectedModelName);
+      setSelectedAr(restored.selectedAr);
+      setSelectedDuration(restored.selectedDuration);
+      setSelectedResolution(restored.selectedResolution);
+      setSelectedQuality(restored.selectedQuality);
+      setSelectedMode(restored.selectedMode);
+      setSelectedEffect(restored.selectedEffect);
+      setUploadedImageUrls(restored.uploadedImageUrls);
+      setUploadedVideoUrl(restored.uploadedVideoUrl);
+      setUploadedVideoName(restored.uploadedVideoName);
+      setPrompt(restored.prompt);
+      setGenerationName(restored.generationName || "");
+      setNameSequence(restored.nameSequence || { base: "", next: 1 });
+      setVeoInputMode(restored.veoInputMode || "frames");
+      setRefTrimNotice(restored.refTrimNotice || "");
+      setLocalHistory(restored.localHistory);
+      applyControlsForModel(restored.selectedModel, restored.imageMode, restored.v2vMode);
+      setSelectedAudio(restored.selectedAudio);
       listNativeLibrary({ kind: "video", limit: 50 })
-        .then((items) => setLocalHistory((prev) => mergeServerHistory(prev.length ? prev : restoredHistory, items)))
-        .catch((err) => console.warn("Failed to hydrate VideoStudio library:", err));
+        .then((items) => {
+          nativeGenerationRegistry.resumeAll();
+          setLocalHistory((prev) => {
+            const merged = mergeServerHistory(prev.length ? prev : restored.localHistory, items);
+            const missed = nativeGenerationRegistry.consume("video");
+            return [...missed, ...merged.filter((item) => !missed.some((entry) => sameHistoryEntry(item, entry)))].slice(0, 50);
+          });
+        })
+        .catch((err) => console.warn("Failed to hydrate VideoStudio library:", err))
+        .finally(() => {
+          registryHydratedRef.current = true;
+          const missed = nativeGenerationRegistry.consume("video");
+          if (missed.length) {
+            setLocalHistory((prev) => [...missed, ...prev.filter((item) => !missed.some((entry) => sameHistoryEntry(item, entry)))].slice(0, 50));
+          }
+        });
     } catch (err) {
       console.warn("Failed to load VideoStudio persistence:", err);
     } finally {
       hasRestored.current = true;
     }
-  }, [applyControlsForModel, defaultModel.id]);
+    return () => {
+      mountedRef.current = false;
+    };
+  }, [applyControlsForModel, consumeGeneratedImageHandoff, defaultModel.id, defaultModel.inputs?.aspect_ratio?.default, defaultModel.inputs?.duration?.default, defaultModel.inputs?.quality?.default, defaultModel.inputs?.resolution?.default, defaultModel.name, mergeHandoffUrls, reportHandoffFailure]);
 
   // ── Adjust height on load ────────────────────────────────────────────────
   useEffect(() => {
@@ -731,6 +973,10 @@ export default function VideoStudio({
           uploadedVideoUrl,
           uploadedVideoName,
           prompt,
+          generationName,
+          nameSequence,
+          veoInputMode,
+          refTrimNotice,
           localHistory,
         };
         localStorage.setItem(PERSIST_KEY, JSON.stringify(state));
@@ -756,6 +1002,10 @@ export default function VideoStudio({
     uploadedVideoUrl,
     uploadedVideoName,
     prompt,
+    generationName,
+    nameSequence,
+    veoInputMode,
+    refTrimNotice,
     localHistory,
   ]);
 
@@ -772,7 +1022,6 @@ export default function VideoStudio({
       const url = await uploadVideoStudioImage(selectedModel, apiKey, file, (pct) => {
         setImageProgress(pct);
       });
-      setUploadedImageUrl(url);
       setUploadedVideoUrl(null);
       setUploadedVideoName(null);
       setV2vMode(false);
@@ -797,13 +1046,14 @@ export default function VideoStudio({
         }
       }
 
-      const maxImgs = getMaxImagesForI2VNative(targetModelId);
+      const maxImgs = getMaxImagesForVideoInputMode(targetModelId, veoInputMode);
       if (maxImgs > 2) {
+        setRefTrimNotice("");
         setUploadedImageUrls((prev) => {
-          if (prev.includes(url)) return prev;
-          return [...prev, url].slice(0, maxImgs);
+          return prev.includes(url) ? prev : [...prev, url].slice(0, maxImgs);
         });
       } else {
+        setRefTrimNotice("");
         setUploadedImageUrls([url]);
       }
       setPromptDisabled(false);
@@ -820,25 +1070,42 @@ export default function VideoStudio({
       alert("Video exceeds 50MB limit.");
       return;
     }
+    const nativeVideoUpload = shouldUseNativeVideoUpload(selectedModel);
+    if (nativeVideoUpload && file.type !== "video/mp4") {
+      setVideoUploadError("Native video input supports MP4 only");
+      setTimeout(() => setVideoUploadError(""), 4000);
+      return;
+    }
+    setVideoUploadError("");
     setVideoUploading(true);
     setVideoProgress(0);
     try {
-      const url = await uploadFile(apiKey, file, (pct) => {
-        setVideoProgress(pct);
-      });
+      const url = nativeVideoUpload
+        ? (await uploadNativeFile(file)).url
+        : await uploadFile(apiKey, file, (pct) => {
+            setVideoProgress(pct);
+          });
       setUploadedVideoUrl(url);
       setUploadedVideoName(file.name);
-      if (imageMode) {
-        setUploadedImageUrl(null);
+      if (nativeVideoUpload) {
+        setUploadedImageUrls([]);
+        setUploadedEndImageUrl(null);
         setImageMode(false);
+        setV2vMode(false);
+        setPromptDisabled(false);
+      } else {
+        setUploadedImageUrls([]);
+        if (imageMode) {
+          setImageMode(false);
+        }
+        setV2vMode(true);
+        const firstV2V = v2vModels[0];
+        setSelectedModel(firstV2V.id);
+        setSelectedModelName(firstV2V.name);
+        applyControlsForModel(firstV2V.id, false, true);
+        setPrompt("");
+        setPromptDisabled(true);
       }
-      setV2vMode(true);
-      const firstV2V = v2vModels[0];
-      setSelectedModel(firstV2V.id);
-      setSelectedModelName(firstV2V.name);
-      applyControlsForModel(firstV2V.id, false, true);
-      setPrompt("");
-      setPromptDisabled(true);
     } catch (err) {
       alert(`Video upload failed: ${err.message}`);
     } finally {
@@ -890,7 +1157,24 @@ export default function VideoStudio({
     el.style.height = Math.min(el.scrollHeight, maxH) + "px";
   };
 
+  useEffect(() => {
+    if (!hasRestored.current) return;
+    const handoff = consumeGeneratedImageHandoff();
+    if (!handoff) return;
+    if (handoff.error) {
+      reportHandoffFailure(handoff.error);
+      return;
+    }
+    const plan = planReferenceHandoff({ urls: handoff.urls, currentModelId: selectedModelRef.current });
+    if (!plan.modelId) {
+      reportHandoffFailure(plan.warnings);
+      return;
+    }
+    applyReferenceHandoffPlan(plan);
+  }, [applyReferenceHandoffPlan, consumeGeneratedImageHandoff, referenceHandoffNonce, reportHandoffFailure]);
+
   // ── image upload ─────────────────────────────────────────────────────────
+
   const handleImageFileChange = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -905,8 +1189,6 @@ export default function VideoStudio({
       const url = await uploadVideoStudioImage(selectedModel, apiKey, file, (pct) => {
         setImageProgress(pct);
       });
-      setUploadedImageUrl(url);
-
       // Motion-control v2v: image is a second input, not a mode switch
       if (isMotionControlSelection(selectedModel, v2vMode)) {
         setPromptDisabled(false);
@@ -937,13 +1219,14 @@ export default function VideoStudio({
           }
         }
 
-        const maxImgs = getMaxImagesForI2VNative(targetModelId);
+        const maxImgs = getMaxImagesForVideoInputMode(targetModelId, veoInputMode);
         if (maxImgs > 2) {
+          setRefTrimNotice("");
           setUploadedImageUrls((prev) => {
-            if (prev.includes(url)) return prev;
-            return [...prev, url].slice(0, maxImgs);
+            return prev.includes(url) ? prev : [...prev, url].slice(0, maxImgs);
           });
         } else {
+          setRefTrimNotice("");
           setUploadedImageUrls([url]);
         }
         setPromptDisabled(false);
@@ -959,9 +1242,9 @@ export default function VideoStudio({
   };
 
   const clearImageUpload = () => {
-    setUploadedImageUrl(null);
     setUploadedImageUrls([]);
     setUploadedEndImageUrl(null);
+    setRefTrimNotice("");
     // Motion-control v2v: keep model and video; just drop the image
     if (isMotionControlSelection(selectedModel, v2vMode)) return;
     setImageMode(false);
@@ -980,8 +1263,8 @@ export default function VideoStudio({
   const removeImageAtIndex = (idx) => {
     const nextUrls = uploadedImageUrls.filter((_, i) => i !== idx);
     setUploadedImageUrls(nextUrls);
+    setRefTrimNotice("");
     if (nextUrls.length === 0) {
-      setUploadedImageUrl(null);
       // Reset to text-to-video if empty list
       if (isMotionControlSelection(selectedModel, v2vMode)) return;
       setImageMode(false);
@@ -995,8 +1278,6 @@ export default function VideoStudio({
         applyControlsForModel(first.id, false, false);
       }
       setPromptDisabled(false);
-    } else {
-      setUploadedImageUrl(nextUrls[0]);
     }
   };
 
@@ -1034,22 +1315,37 @@ export default function VideoStudio({
       alert("Video exceeds 50MB limit.");
       return;
     }
+    const nativeVideoUpload = shouldUseNativeVideoUpload(selectedModel);
+    if (nativeVideoUpload && file.type !== "video/mp4") {
+      setVideoUploadError("Native video input supports MP4 only");
+      setTimeout(() => setVideoUploadError(""), 4000);
+      return;
+    }
+    setVideoUploadError("");
     setVideoUploading(true);
     setVideoProgress(0);
     try {
-      const url = await uploadFile(apiKey, file, (pct) => {
-        setVideoProgress(pct);
-      });
+      const url = nativeVideoUpload
+        ? (await uploadNativeFile(file)).url
+        : await uploadFile(apiKey, file, (pct) => {
+            setVideoProgress(pct);
+          });
       setUploadedVideoUrl(url);
       setUploadedVideoName(file.name);
 
-      if (isMotionControlSelection(selectedModel, v2vMode)) {
+      if (nativeVideoUpload) {
+        setUploadedImageUrls([]);
+        setUploadedEndImageUrl(null);
+        setImageMode(false);
+        setV2vMode(false);
+        setPromptDisabled(false);
+      } else if (isMotionControlSelection(selectedModel, v2vMode)) {
         // Already in motion-control mode — keep model and image, allow prompt
         setPromptDisabled(false);
       } else {
         // Default v2v flow (e.g. watermark remover) — auto-pick the first v2v model
+        setUploadedImageUrls([]);
         if (imageMode) {
-          setUploadedImageUrl(null);
           setImageMode(false);
         }
         setV2vMode(true);
@@ -1084,13 +1380,20 @@ export default function VideoStudio({
   // ── model selection from dropdown ─────────────────────────────────────────
   const handleModelSelect = useCallback(
     (m, isV2V) => {
+      setRefTrimNotice("");
+      const trimImageRefs = (maxImages, label) => {
+        const kept = Math.max(1, maxImages);
+        if (uploadedImageUrls.length > kept) {
+          setRefTrimNotice(`Kept ${kept} of ${uploadedImageUrls.length} reference images — ${label} accepts ${kept}`);
+        }
+        setUploadedImageUrls(uploadedImageUrls.slice(0, kept));
+      };
       if (isV2V) {
         setV2vMode(true);
         setImageMode(false);
         const isMC = !!m.imageField;
-        if (!isMC) {
-          // Single-input v2v (watermark remover etc.) — drop any image
-          setUploadedImageUrl(null);
+        if (isMC) {
+          trimImageRefs(m.maxImages || 1, m.name);
         }
         setSelectedModel(m.id);
         setSelectedModelName(m.name);
@@ -1111,26 +1414,40 @@ export default function VideoStudio({
           setPromptDisabled(false);
         }
         const forceImageMode = !imageMode && isNativeI2VOnlyModel(nativeModel);
-        if (forceImageMode) {
-          setImageMode(true);
-        }
+        const targetSupportsImage = nativeModel?.tasks?.includes("image-to-video") || !!m.imageField;
+        const nextImageMode = imageMode || forceImageMode || (uploadedImageUrls.length > 0 && targetSupportsImage);
         setSelectedModel(m.id);
         setSelectedModelName(nativeModel?.label || m.name);
-        applyControlsForModel(m.id, imageMode || forceImageMode, false);
+        if (!isVeoReferenceModel(nativeModel)) setVeoInputMode("frames");
+        setImageMode(nextImageMode && targetSupportsImage);
+        applyControlsForModel(m.id, nextImageMode && targetSupportsImage, false);
+        if (nextImageMode && targetSupportsImage) {
+          trimImageRefs(getMaxImagesForVideoInputMode(m.id, veoInputMode), nativeModel?.label || m.name);
+        }
       }
     },
-    [v2vMode, imageMode, applyControlsForModel],
+    [v2vMode, imageMode, uploadedImageUrls, veoInputMode, applyControlsForModel],
   );
 
   // ── add to local history ──────────────────────────────────────────────────
   const addToLocalHistory = useCallback((entry) => {
-    setLocalHistory((prev) => [entry, ...prev].slice(0, 30));
+    setLocalHistory((prev) => [entry, ...prev.filter((item) => !sameHistoryEntry(item, entry))].slice(0, 30));
     setActiveHistoryIdx(0);
   }, []);
 
+  useEffect(() => {
+    const insertMissed = () => {
+      if (!registryHydratedRef.current) return;
+      const missed = nativeGenerationRegistry.consume("video");
+      missed.forEach(addToLocalHistory);
+    };
+    const unsubscribe = nativeGenerationRegistry.subscribe("video", insertMissed);
+    return unsubscribe;
+  }, [addToLocalHistory]);
+
   const deleteHistoryEntry = useCallback(async (entry) => {
     if (!confirm("Delete this generation from the interface and server? This cannot be undone.")) return;
-    const jobId = entry?.jobId || entry?.request_id || (entry?.serverBacked ? entry?.id : null);
+    const jobId = nativeVideoJobId(entry);
     if (entry?.serverBacked && jobId) {
       try {
         await deleteNativeLibraryItem(jobId);
@@ -1141,6 +1458,40 @@ export default function VideoStudio({
       }
     }
     setLocalHistory((prev) => prev.filter((item) => item !== entry && !sameHistoryEntry(item, entry)));
+  }, []);
+
+  const renameHistoryEntry = useCallback(async (entry) => {
+    const jobId = nativeVideoJobId(entry);
+    if (!entry?.native || !jobId) return;
+    const name = window.prompt("Rename generation", entry.displayName || "");
+    if (name === null) return;
+    const displayName = name.trim();
+    if (!displayName) return;
+    try {
+      const updated = await renameNativeLibraryItem(jobId, displayName);
+      setLocalHistory((prev) =>
+        prev.map((item) =>
+          item === entry || sameHistoryEntry(item, entry)
+            ? { ...item, displayName: updated.displayName || displayName, downloadName: updated.downloadName || updated.displayName || displayName }
+            : item,
+        ),
+      );
+    } catch (err) {
+      console.warn("Failed to rename VideoStudio library item:", err);
+      alert("Failed to rename generation.");
+    }
+  }, []);
+
+  const downloadLastFrameForEntry = useCallback(async (entry) => {
+    const jobId = nativeVideoJobId(entry);
+    if (!jobId) return;
+    setLastFrameStatus("");
+    try {
+      await downloadNativeLibraryLastFrame(jobId);
+    } catch (err) {
+      console.warn("Failed to download VideoStudio last frame:", err);
+      setLastFrameStatus("Failed to download last frame.");
+    }
   }, []);
 
   // ── show result in canvas ─────────────────────────────────────────────────
@@ -1177,7 +1528,7 @@ export default function VideoStudio({
         return;
       }
     } else if (imageMode) {
-      const maxImgs = getMaxImagesForI2VNative(selectedModel);
+      const maxImgs = getMaxImagesForVideoInputMode(selectedModel, veoInputMode);
       if (maxImgs > 2) {
         if (uploadedImageUrls.length === 0) {
           alert("Please upload at least one reference image first.");
@@ -1190,7 +1541,7 @@ export default function VideoStudio({
         }
       }
     } else {
-      if (!trimmedPrompt) {
+      if (!trimmedPrompt && !(uploadedVideoUrl && shouldUseNativeVideoUpload(selectedModel))) {
         alert("Please enter a prompt to generate a video.");
         return;
       }
@@ -1199,9 +1550,9 @@ export default function VideoStudio({
     if (imageMode && isNativeModelId(selectedModel)) {
       const model = nativeModelById(selectedModel);
       const referenceImagesEnabled = model?.referenceImagesEnabled || nativeVideoReferencesEnabled(model);
-      const refCount = referenceImagesEnabled ? Math.max(0, uploadedImageUrls.length - 1) : 0;
+      const refCount = veoReferencesMode ? uploadedImageUrls.length : referenceImagesEnabled ? Math.max(0, uploadedImageUrls.length - 1) : 0;
       const requiredDuration = model?.provider === "vertex" ? model?.referenceDurationSeconds || 8 : model?.referenceDurationSeconds;
-      if (uploadedEndImageUrl && model?.supportsLastFrame !== false && requiredDuration) {
+      if (!veoReferencesMode && uploadedEndImageUrl && model?.supportsLastFrame !== false && requiredDuration) {
         if (uploadedEndImageUrl && Number(selectedDuration) !== requiredDuration) {
           alert(`Veo last frame requires ${requiredDuration}s duration.`);
           return;
@@ -1217,6 +1568,7 @@ export default function VideoStudio({
     setGenerateError(null);
 
     let hadError = false;
+    const { displayName: submitDisplayName, nextSequence } = nextDisplayNameForSubmit(generationName, nameSequence, history);
 
     try {
       let res;
@@ -1256,16 +1608,71 @@ export default function VideoStudio({
             prompt: currentModel?.hasPrompt ? trimmedPrompt : "",
             type: "video",
           });
+      } else if (uploadedVideoUrl && shouldUseNativeVideoUpload(selectedModel)) {
+        const model = nativeModelById(selectedModel);
+        const input = nativeInputFromUrl(uploadedVideoUrl, "input");
+        res = await generateNativeMedia({
+          modelId: selectedModel,
+          task: "image-to-video",
+          prompt: trimmedPrompt,
+          parameters: nativeVideoParams(model, selectedAr, selectedDuration, selectedResolution, selectedAudio),
+          inputs: input ? [input] : [],
+          displayName: submitDisplayName,
+          onSubmitted: (job) => nativeGenerationRegistry.track(job, {
+            studio: "video",
+            prompt: trimmedPrompt,
+            displayName: submitDisplayName,
+            model,
+          }),
+        });
+        if (!res?.url) throw new Error("No video URL returned by API");
+
+        const genId = res.request_id || res.id || Date.now().toString();
+        setLastGenerationId(null);
+        setLastGenerationModel(null);
+        const entry = {
+          id: genId,
+          jobId: genId,
+          url: res.url,
+          prompt: trimmedPrompt,
+          model: selectedModel,
+          aspect_ratio: selectedAr,
+          duration: selectedDuration,
+          resolution: nativeVideoCardResolution(model, selectedResolution),
+          displayName: res.displayName || submitDisplayName || undefined,
+          downloadName: res.downloadName || res.displayName || submitDisplayName || undefined,
+          timestamp: new Date().toISOString(),
+          status: "completed",
+          native: true,
+          serverBacked: true,
+        };
+        addToLocalHistory(entry);
+        if (mountedRef.current) nativeGenerationRegistry.settle(genId);
+        if (submitDisplayName) setNameSequence(nextSequence);
+        setRefTrimNotice("");
+        showVideoInCanvas(res.url, selectedModel);
+        if (onGenerationComplete)
+          onGenerationComplete({
+            url: res.url,
+            model: selectedModel,
+            prompt: trimmedPrompt,
+            type: "video",
+          });
+        return;
       } else if (imageMode) {
         const maxImgs = getMaxImagesForI2VNative(selectedModel);
         if (isNativeModelId(selectedModel)) {
           const model = nativeModelById(selectedModel);
           const referenceImagesEnabled = model?.referenceImagesEnabled || nativeVideoReferencesEnabled(model);
-          const imageUrls = referenceImagesEnabled ? uploadedImageUrls : uploadedImageUrls.slice(0, 1);
+          const imageUrls = veoReferencesMode
+            ? uploadedImageUrls.slice(0, 3)
+            : referenceImagesEnabled
+              ? uploadedImageUrls
+              : uploadedImageUrls.slice(0, 1);
           const inputs = imageUrls
-            .map((u, idx) => nativeInputFromUrl(u, idx === 0 ? "first-frame" : "reference"))
+            .map((u, idx) => nativeInputFromUrl(u, veoReferencesMode ? "reference" : idx === 0 ? "first-frame" : "reference"))
             .filter(Boolean);
-          if (model?.supportsLastFrame !== false) {
+          if (!veoReferencesMode && model?.supportsLastFrame !== false) {
             const endFrame = nativeInputFromUrl(uploadedEndImageUrl, "last-frame");
             if (endFrame) inputs.push(endFrame);
           }
@@ -1275,6 +1682,13 @@ export default function VideoStudio({
             prompt: trimmedPrompt,
             parameters: nativeVideoParams(model, selectedAr, selectedDuration, selectedResolution, selectedAudio),
             inputs,
+            displayName: submitDisplayName,
+            onSubmitted: (job) => nativeGenerationRegistry.track(job, {
+              studio: "video",
+              prompt: trimmedPrompt,
+              displayName: submitDisplayName,
+              model,
+            }),
           });
           if (!res?.url) throw new Error("No video URL returned by API");
 
@@ -1290,11 +1704,17 @@ export default function VideoStudio({
             aspect_ratio: selectedAr,
             duration: selectedDuration,
             resolution: nativeVideoCardResolution(model, selectedResolution),
+            displayName: res.displayName || submitDisplayName || undefined,
+            downloadName: res.downloadName || res.displayName || submitDisplayName || undefined,
             timestamp: new Date().toISOString(),
+            status: "completed",
             native: true,
             serverBacked: true,
           };
           addToLocalHistory(entry);
+          if (mountedRef.current) nativeGenerationRegistry.settle(genId);
+          if (submitDisplayName) setNameSequence(nextSequence);
+          setRefTrimNotice("");
           showVideoInCanvas(res.url, selectedModel);
           if (onGenerationComplete)
             onGenerationComplete({
@@ -1363,6 +1783,13 @@ export default function VideoStudio({
             task: "text-to-video",
             prompt: trimmedPrompt,
             parameters: nativeVideoParams(model, selectedAr, selectedDuration, selectedResolution, selectedAudio),
+            displayName: submitDisplayName,
+            onSubmitted: (job) => nativeGenerationRegistry.track(job, {
+              studio: "video",
+              prompt: trimmedPrompt,
+              displayName: submitDisplayName,
+              model,
+            }),
           });
           if (!res?.url) throw new Error("No video URL returned by API");
 
@@ -1378,11 +1805,17 @@ export default function VideoStudio({
             aspect_ratio: selectedAr,
             duration: selectedDuration,
             resolution: nativeVideoCardResolution(model, selectedResolution),
+            displayName: res.displayName || submitDisplayName || undefined,
+            downloadName: res.downloadName || res.displayName || submitDisplayName || undefined,
             timestamp: new Date().toISOString(),
+            status: "completed",
             native: true,
             serverBacked: true,
           };
           addToLocalHistory(entry);
+          if (mountedRef.current) nativeGenerationRegistry.settle(genId);
+          if (submitDisplayName) setNameSequence(nextSequence);
+          setRefTrimNotice("");
           showVideoInCanvas(res.url, selectedModel);
           if (onGenerationComplete)
             onGenerationComplete({
@@ -1469,6 +1902,10 @@ export default function VideoStudio({
     uploadedVideoUrl,
     uploadedEndImageUrl,
     lastGenerationId,
+    generationName,
+    nameSequence,
+    history,
+    veoReferencesMode,
     getCurrentModel,
     addToLocalHistory,
     showVideoInCanvas,
@@ -1483,7 +1920,6 @@ export default function VideoStudio({
   const handleNewPrompt = useCallback(() => {
     resetToPromptBar();
     setPrompt("");
-    setUploadedImageUrl(null);
     setUploadedImageUrls([]);
     setImageMode(false);
     setUploadedVideoUrl(null);
@@ -1501,7 +1937,6 @@ export default function VideoStudio({
     if (!lastGenerationId) return;
     resetToPromptBar();
     setPrompt("");
-    setUploadedImageUrl(null);
     setUploadedImageUrls([]);
     setImageMode(false);
     setSelectedModel("seedance-v2.0-extend");
@@ -1516,6 +1951,16 @@ export default function VideoStudio({
     canvasModel === "seedance-v2.0-t2v" || canvasModel === "seedance-v2.0-i2v";
   const currentModelObj = getCurrentModel();
   const isExtendMode = currentModelObj?.requiresRequestId;
+  const selectedModelCanUseImageRefs = v2vMode
+    ? !!currentModelObj?.imageField
+    : imageMode && (currentNativeModel?.tasks?.includes("image-to-video") || !!currentModelObj?.imageField);
+  const showImageReferenceStrip =
+    uploadedImageUrls.length > 0 &&
+    (getMaxImagesForVideoInputMode(selectedModel, veoInputMode) > 2 || !selectedModelCanUseImageRefs);
+  const imageReferenceWarning =
+    uploadedImageUrls.length > 0 && !selectedModelCanUseImageRefs
+      ? `${selectedModelName} won't use reference images`
+      : "";
 
   const promptPlaceholder = v2vMode
     ? currentModelObj?.imageField
@@ -1540,30 +1985,85 @@ export default function VideoStudio({
       ref={containerRef}
       className="w-full h-full flex flex-col items-center justify-center bg-app-bg relative overflow-hidden"
     >
+      <Toaster position="bottom-right" reverseOrder={false} />
       {/* ── CENTRAL GALLERY AREA ── */}
       <div className="flex-1 w-full max-w-7xl mx-auto overflow-y-auto custom-scrollbar pb-40 lg:pb-32 px-2">
         {history.length > 0 ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 w-full pt-4 animate-fade-in-up">
-            {history.map((entry, idx) => {
+          <div className="w-full pt-4 animate-fade-in-up">
+            {lastFrameStatus && (
+              <div className="mb-3 rounded-md border border-red-400/30 bg-red-500/10 px-3 py-2 text-xs text-red-200">
+                {lastFrameStatus}
+              </div>
+            )}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 w-full">
+              {history.map((entry, idx) => {
               const isSeedance2 = entry.model === "seedance-v2.0-t2v" || entry.model === "seedance-v2.0-i2v";
+              const canDownloadLastFrame = canDownloadNativeLastFrame(entry);
+              const isFailedEntry = isFailedHistoryEntry(entry);
+              if (isFailedEntry) {
+                return (
+                  <div
+                    key={entry.id || idx}
+                    className="relative group rounded-lg overflow-hidden border border-red-400/30 bg-[#160909] shadow-xl transition-all duration-300 flex flex-col"
+                  >
+                    <div className="w-full aspect-video bg-red-950/30 px-4 py-5 flex flex-col justify-center gap-3">
+                      <div className="inline-flex w-fit items-center rounded-full border border-red-300/30 bg-red-500/10 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wide text-red-200">
+                        Generation failed
+                      </div>
+                      <div className="text-sm font-semibold text-white/90">
+                        {entry.displayName || "Native video generation failed"}
+                      </div>
+                      <p className="line-clamp-3 text-xs leading-relaxed text-red-100/80">
+                        {entry.error || entry.status || "Provider failed before returning playable media."}
+                      </p>
+                    </div>
+                    <div className="absolute top-2 right-2 flex flex-col gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button
+                        type="button"
+                        title="Copy prompt"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          copyPromptToClipboard(entry.prompt);
+                        }}
+                        className="p-2 bg-black/60 backdrop-blur-md rounded-full text-white hover:bg-primary hover:text-black transition-all border border-white/10"
+                      >
+                        <Copy size={14} strokeWidth={2.5} />
+                      </button>
+                      <button
+                        type="button"
+                        title="Delete"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          deleteHistoryEntry(entry);
+                        }}
+                        className="p-2 bg-black/60 backdrop-blur-md rounded-full text-white hover:bg-red-500 hover:text-white transition-all border border-white/10"
+                      >
+                        <Trash2 size={14} strokeWidth={2.5} />
+                      </button>
+                    </div>
+                    <div className="p-3 flex flex-col gap-1 bg-[#0f0f0f] border-t border-white/5">
+                      <div className="flex items-center justify-between gap-2 text-xs">
+                        <span className="font-bold text-red-200">{entry.status || "failed"}</span>
+                        <span className="text-white/30">{entry.timestamp ? new Date(entry.timestamp).toLocaleDateString() : ""}</span>
+                      </div>
+                      {entry.prompt && (
+                        <p className="text-xs text-white/45 truncate" title={entry.prompt}>
+                          {entry.prompt}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                );
+              }
               return (
                 <div
                   key={entry.id || idx}
                   className="relative group rounded-lg overflow-hidden border border-white/10 bg-[#0a0a0a] shadow-xl hover:border-primary/50 transition-all duration-300 flex flex-col"
                 >
-                  <video
+                  <LazyVideo
                     src={entry.url}
-                    className="w-full aspect-video object-cover bg-black/40 cursor-pointer hover:opacity-80 transition-opacity"
+                    className="w-full aspect-video overflow-hidden bg-black/40 cursor-pointer hover:opacity-80 transition-opacity"
                     onClick={() => setFullscreenUrl(entry.url)}
-                    controls={false}
-                    loop
-                    muted
-                    playsInline
-                    onMouseOver={(e) => e.currentTarget.play().catch(() => {})}
-                    onMouseOut={(e) => {
-                      e.target.pause();
-                      e.target.currentTime = 0;
-                    }}
                   />
                   
                   {/* Overlay actions */}
@@ -1589,7 +2089,7 @@ export default function VideoStudio({
                       title="Download"
                       onClick={(e) => {
                         e.stopPropagation();
-                        downloadFile(entry.url, `video-${entry.id || idx}.mp4`);
+                        downloadFile(entry.url, videoDownloadName(entry, idx));
                       }}
                       className="p-2 bg-black/60 backdrop-blur-md rounded-full text-white hover:bg-primary hover:text-black transition-all border border-white/10"
                     >
@@ -1597,6 +2097,32 @@ export default function VideoStudio({
                         <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3" />
                       </svg>
                     </button>
+                    {canDownloadLastFrame && (
+                      <button
+                        type="button"
+                        title="Download last frame"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          downloadLastFrameForEntry(entry);
+                        }}
+                        className="p-2 bg-black/60 backdrop-blur-md rounded-full text-white hover:bg-primary hover:text-black transition-all border border-white/10"
+                      >
+                        <Download size={14} strokeWidth={2.5} />
+                      </button>
+                    )}
+                    {entry.native && nativeVideoJobId(entry) && (
+                      <button
+                        type="button"
+                        title="Rename"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          renameHistoryEntry(entry);
+                        }}
+                        className="p-2 bg-black/60 backdrop-blur-md rounded-full text-white hover:bg-primary hover:text-black transition-all border border-white/10"
+                      >
+                        <Pencil size={14} strokeWidth={2.5} />
+                      </button>
+                    )}
                     <button
                       type="button"
                       title="Copy prompt"
@@ -1643,6 +2169,11 @@ export default function VideoStudio({
                       {entry.prompt || "No prompt provided"}
                     </p>
                     <div className="flex items-center justify-between mt-1 flex-wrap gap-1">
+                      {entry.displayName && (
+                        <span className="max-w-full truncate text-[10px] font-semibold text-white/60" title={entry.displayName}>
+                          {entry.displayName}
+                        </span>
+                      )}
                       <span className="text-[10px] font-bold text-primary px-2 py-0.5 bg-primary/10 rounded border border-primary/20 whitespace-nowrap">
                         {entry.model?.replace("-", " ")}
                       </span>
@@ -1659,6 +2190,7 @@ export default function VideoStudio({
                 </div>
               );
             })}
+            </div>
           </div>
         ) : (
           <div className="flex flex-col items-center justify-center h-full animate-fade-in-up transition-all duration-700 min-h-[50vh]">
@@ -1688,9 +2220,32 @@ export default function VideoStudio({
       {/* ── BOTTOM PROMPT BAR ── */}
       <div className="absolute bottom-4 w-full max-w-[95%] lg:max-w-4xl z-40 animate-fade-in-up" style={{ animationDelay: "0.2s" }}>
         <div className="w-full bg-[#0a0a0a]/80 backdrop-blur-3xl rounded-md border border-white/10 p-4 flex flex-col gap-2 shadow-2xl">
+          {imageMode && isVeoReferenceModel(currentNativeModel) && (
+            <div className="flex flex-wrap items-center gap-2 px-1">
+              <div className="inline-flex rounded-md border border-white/[0.06] bg-white/[0.03] p-1">
+                {["frames", "references"].map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => setVeoInputMode(mode)}
+                    className={`rounded px-3 py-1.5 text-[11px] font-bold transition-colors ${
+                      veoInputMode === mode ? "bg-[#22d3ee] text-black" : "text-white/50 hover:text-white"
+                    }`}
+                  >
+                    {mode === "frames" ? "Frames" : "References"}
+                  </button>
+                ))}
+              </div>
+              {veoReferencesMode && (
+                <span className="text-[10px] font-semibold text-white/40">
+                  8s and 16:9 required for Veo references
+                </span>
+              )}
+            </div>
+          )}
           <div className="flex items-center gap-2 px-1">
             {/* Image upload button / thumbnails */}
-            {imageMode && getMaxImagesForI2VNative(selectedModel) > 2 ? (
+            {showImageReferenceStrip ? (
               <div className="flex items-center gap-2 flex-wrap">
                 {uploadedImageUrls.map((url, idx) => (
                   <div key={idx} className="relative w-10 h-10 shrink-0 rounded-full border border-primary/60 bg-primary/5 overflow-hidden group">
@@ -1708,7 +2263,7 @@ export default function VideoStudio({
                     </span>
                   </div>
                 ))}
-                {uploadedImageUrls.length < getMaxImagesForI2VNative(selectedModel) && (
+                {selectedModelCanUseImageRefs && uploadedImageUrls.length < getMaxImagesForVideoInputMode(selectedModel, veoInputMode) && (
                   <div className="relative">
                     <input
                       ref={imageFileInputRef}
@@ -1835,8 +2390,22 @@ export default function VideoStudio({
               </div>
             )}
 
+            {(imageReferenceWarning || refTrimNotice) && (
+              <div className="flex items-center gap-2 rounded-md border border-amber-400/30 bg-amber-500/10 px-2 py-1 text-[10px] font-semibold text-amber-200">
+                <span>{refTrimNotice || imageReferenceWarning}</span>
+                <button
+                  type="button"
+                  title={refTrimNotice ? "Dismiss warning" : "Remove all reference images"}
+                  onClick={() => (refTrimNotice ? setRefTrimNotice("") : setUploadedImageUrls([]))}
+                  className="rounded px-1 text-amber-100 transition-colors hover:bg-amber-400/20"
+                >
+                  ✕
+                </button>
+              </div>
+            )}
+
             {/* End-frame upload button (FLF i2v models only) */}
-            {imageMode && currentModelObj?.lastImageField && (
+            {imageMode && currentModelObj?.lastImageField && !veoReferencesMode && (
               <div className="relative">
                 <input
                   ref={endImageFileInputRef}
@@ -1962,6 +2531,20 @@ export default function VideoStudio({
               </button>
             </div>
 
+            {videoUploadError && (
+              <div className="flex items-center gap-2 rounded-md border border-amber-400/30 bg-amber-500/10 px-2 py-1 text-[10px] font-semibold text-amber-200">
+                <span>{videoUploadError}</span>
+                <button
+                  type="button"
+                  title="Dismiss"
+                  onClick={() => setVideoUploadError("")}
+                  className="rounded px-1 text-amber-100 transition-colors hover:bg-amber-400/20"
+                >
+                  ✕
+                </button>
+              </div>
+            )}
+
             {/* Prompt textarea */}
             <div className="flex-1 flex flex-col gap-1">
               <textarea
@@ -2045,7 +2628,9 @@ export default function VideoStudio({
                   <button
                     type="button"
                     onClick={toggleDropdown("ar")}
+                    disabled={veoReferencesMode}
                     className="flex items-center gap-2 px-3 py-2 bg-white/[0.03] hover:bg-white/[0.06] rounded-md transition-all border border-white/[0.03] group whitespace-nowrap"
+                    title={veoReferencesMode ? "16:9 required for Veo references" : "Aspect Ratio"}
                   >
                     <svg
                       width="14"
@@ -2082,9 +2667,10 @@ export default function VideoStudio({
                         {getCurrentAspectRatios(selectedModel).map((r) => (
                           <div
                             key={r}
-                            className="flex items-center justify-between p-3 hover:bg-white/5 rounded cursor-pointer transition-all group/opt"
+                            className={`flex items-center justify-between p-3 rounded transition-all group/opt ${veoReferencesMode ? "cursor-not-allowed opacity-50" : "hover:bg-white/5 cursor-pointer"}`}
                             onClick={(e) => {
                               e.stopPropagation();
+                              if (veoReferencesMode) return;
                               setSelectedAr(r);
                               setOpenDropdown(null);
                             }}
@@ -2162,7 +2748,9 @@ export default function VideoStudio({
                   <button
                     type="button"
                     onClick={toggleDropdown("duration")}
+                    disabled={veoReferencesMode}
                     className="flex items-center gap-2 px-3 py-2 bg-white/[0.03] hover:bg-white/[0.06] rounded-md transition-all border border-white/[0.03] group whitespace-nowrap"
+                    title={veoReferencesMode ? "8s required for Veo references" : "Duration"}
                   >
                     <svg
                       width="14"
@@ -2193,9 +2781,10 @@ export default function VideoStudio({
                         {getCurrentDurations(selectedModel).map((d) => (
                           <div
                             key={d}
-                            className="flex items-center justify-between p-2 hover:bg-white/5 rounded-md cursor-pointer transition-all group/opt"
+                            className={`flex items-center justify-between p-2 rounded-md transition-all group/opt ${veoReferencesMode ? "cursor-not-allowed opacity-50" : "hover:bg-white/5 cursor-pointer"}`}
                             onClick={(e) => {
                               e.stopPropagation();
+                              if (veoReferencesMode) return;
                               setSelectedDuration(d);
                               setOpenDropdown(null);
                             }}
@@ -2295,6 +2884,15 @@ export default function VideoStudio({
                 </button>
               )}
             </div>
+
+            <input
+              type="text"
+              value={generationName}
+              onChange={(e) => setGenerationName(e.target.value)}
+              maxLength={120}
+              placeholder="Name (optional)"
+              className="w-full sm:w-40 rounded-md border border-white/[0.03] bg-white/[0.03] px-3 py-2 text-xs font-medium text-white/70 placeholder:text-white/20 outline-none transition-colors focus:border-[#22d3ee]/40 focus:bg-white/[0.06]"
+            />
 
             {/* Generate button */}
             <button

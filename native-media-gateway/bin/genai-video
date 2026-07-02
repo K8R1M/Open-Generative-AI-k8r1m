@@ -103,7 +103,7 @@ def _load_image(path: str) -> types.Image:
 def _generate_video(
     client: genai.Client,
     model_id: str,
-    prompt: str,
+    prompt: str | None,
     duration: int = 8,
     aspect_ratio: str = "16:9",
     resolution: str | None = None,
@@ -134,9 +134,10 @@ def _generate_video(
 
     gen_kwargs = {
         "model": model_id,
-        "prompt": prompt,
         "config": types.GenerateVideosConfig(**config_kwargs),
     }
+    if prompt:
+        gen_kwargs["prompt"] = prompt
     if input_image:
         gen_kwargs["image"] = _load_image(input_image)
 
@@ -164,7 +165,7 @@ def _generate_video(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Generate videos via Google GenAI SDK")
-    parser.add_argument("--prompt", "-p", required=True)
+    parser.add_argument("--prompt", "-p")
     _env_default = os.environ.get("VIDEO_MODEL", "veo-3.1-fast")
     if _env_default not in VEO_MODELS:
         print(f"Warning: VIDEO_MODEL='{_env_default}' not in {list(VEO_MODELS.keys())}; using veo-3.1-fast", file=sys.stderr)

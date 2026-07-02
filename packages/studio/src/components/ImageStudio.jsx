@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Copy, Trash2 } from "lucide-react";
+import { Copy, Film, ImagePlus, Pencil, Trash2 } from "lucide-react";
 import { generateImage, generateI2I, uploadFile } from "../muapi.js";
 import {
   t2iModels,
@@ -28,8 +28,15 @@ import {
   generateNativeMedia,
   isSameOriginAssetUrl,
   listNativeLibrary,
+  renameNativeLibraryItem,
   uploadNativeFile,
 } from "../nativeMedia.js";
+import { nativeGenerationRegistry } from "../generationRegistry.js";
+import {
+  historyKeys,
+  normalizeImageServerHistoryEntry as normalizeServerHistoryEntry,
+  sameHistoryEntry,
+} from "../studioHistory.js";
 
 // ─── Native model overlay (C3) ──────────────────────────────────────────────
 // Native image models share their Vertex/Codex facade IDs for both T2I and I2I.
@@ -168,6 +175,40 @@ function nativeInputFromUrl(url, role) {
   return { kind: "asset", assetId, role };
 }
 
+function imageDownloadName(entry, idx) {
+  return `${entry?.displayName || entry?.downloadName || `muapi-${entry?.id || idx}`}.jpg`;
+}
+
+function baseDisplayName(name) {
+  return (name || "").trim().slice(0, 110);
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function initialNextDisplayName(base, history) {
+  const pattern = new RegExp(`^${escapeRegExp(base)}(?:-(\\d{3}))?$`);
+  let max = 0;
+  for (const entry of Array.isArray(history) ? history : []) {
+    const match = typeof entry?.displayName === "string" ? entry.displayName.match(pattern) : null;
+    if (match) max = Math.max(max, match[1] ? Number(match[1]) : 0);
+  }
+  return Math.max(1, max + 1);
+}
+
+function nextDisplayNameForSubmit(rawName, nameSequence, history) {
+  const base = baseDisplayName(rawName);
+  if (!base) return { displayName: undefined, nextSequence: nameSequence };
+  if (nameSequence?.base !== base) {
+    return { displayName: base, nextSequence: { base, next: initialNextDisplayName(base, history) } };
+  }
+  return {
+    displayName: `${base}-${String(Math.max(1, nameSequence.next || 1)).padStart(3, "0")}`,
+    nextSequence: { base, next: Math.max(1, nameSequence.next || 1) + 1 },
+  };
+}
+
 // ─── helpers ────────────────────────────────────────────────────────────────
 
 async function downloadImage(url, filename) {
@@ -187,38 +228,17 @@ async function downloadImage(url, filename) {
   }
 }
 
-function normalizeServerHistoryEntry(item) {
-  const url = item?.url || item?.outputs?.[0];
-  if (!url) return null;
-  return {
-    id: item.jobId || item.id,
-    jobId: item.jobId || item.id,
-    url,
-    prompt: item.prompt || "",
-    model: item.model,
-    aspect_ratio: item.aspectRatio || item.aspect_ratio,
-    timestamp: item.createdAt || item.completedAt || new Date().toISOString(),
-    native: true,
-    serverBacked: true,
-  };
-}
-
-function historyKeys(entry) {
-  return [entry?.jobId, entry?.request_id, entry?.id, entry?.url].filter(Boolean);
-}
-
-function sameHistoryEntry(a, b) {
-  return historyKeys(a).some((key) => historyKeys(b).includes(key));
-}
-
 function mergeServerHistory(local, server) {
   const seen = new Set();
+  const serverKeys = new Set();
   const out = [];
   for (const entry of server.map(normalizeServerHistoryEntry).filter(Boolean)) {
     historyKeys(entry).forEach((key) => seen.add(key));
+    historyKeys(entry).forEach((key) => serverKeys.add(key));
     out.push(entry);
   }
   for (const entry of local || []) {
+    if (entry?.serverBacked && entry?.native && !historyKeys(entry).some((key) => serverKeys.has(key))) continue;
     if (historyKeys(entry).some((key) => seen.has(key))) continue;
     historyKeys(entry).forEach((key) => seen.add(key));
     out.push(entry);
@@ -234,12 +254,17 @@ const UNUSABLE_NATIVE_IMAGE_STATUSES = new Set([
   "asset_unavailable",
   "unavailable",
 ]);
+const GENERATED_IMAGE_TO_IMAGE_STUDIO_KEY = "nativeGeneratedImageReference:image";
 
 function isUsableGeneratedImageResult(res) {
   if (!res?.url) return false;
   if (!res.native) return true;
   const status = String(res.status || "completed").toLowerCase();
   return !res.error && !UNUSABLE_NATIVE_IMAGE_STATUSES.has(status) && !status.includes("unavailable") && isSameOriginAssetUrl(res.url);
+}
+
+function generatedImageReferenceUrls(entry) {
+  return entry?.native && isSameOriginAssetUrl(entry?.url) ? [entry.url] : [];
 }
 
 // ─── UploadButton (inline picker) ───────────────────────────────────────────
@@ -1000,6 +1025,8 @@ export default function ImageStudio({
   historyItems,
   droppedFiles,
   onFilesHandled,
+  onGeneratedImageReference,
+  referenceHandoffNonce,
 }) {
   const PERSIST_KEY = "hg_image_studio_persistent";
 
@@ -1019,6 +1046,8 @@ export default function ImageStudio({
 
   // ── Prompt / upload state ───────────────────────────────────────────────
   const [prompt, setPrompt] = useState("");
+  const [generationName, setGenerationName] = useState("");
+  const [nameSequence, setNameSequence] = useState({ base: "", next: 1 });
   const [uploadedImageUrls, setUploadedImageUrls] = useState([]);
 
   // ── UI state ────────────────────────────────────────────────────────────
@@ -1039,6 +1068,8 @@ export default function ImageStudio({
   // ── Refs ────────────────────────────────────────────────────────────────
   const textareaRef = useRef(null);
   const dropdownRef = useRef(null);
+  const registryHydratedRef = useRef(false);
+  const mountedRef = useRef(false);
   const uploadPickerResetRef = useRef(null); // not used directly — managed via key
 
   // ── Close dropdown on outside click ─────────────────────────────────────
@@ -1055,6 +1086,7 @@ export default function ImageStudio({
 
   // ── Persistence: Load ────────────────────────────────────────────────────
   useEffect(() => {
+    mountedRef.current = true;
     try {
       let restoredHistory = [];
       const stored = localStorage.getItem(PERSIST_KEY);
@@ -1068,6 +1100,8 @@ export default function ImageStudio({
         if (data.selectedEffect) setSelectedEffect(data.selectedEffect);
         if (data.maxImages) setMaxImages(data.maxImages);
         if (data.prompt) setPrompt(data.prompt);
+        if (data.generationName) setGenerationName(data.generationName);
+        if (data.nameSequence) setNameSequence(data.nameSequence);
         if (data.uploadedImageUrls) setUploadedImageUrls(data.uploadedImageUrls);
         if (data.batchSize) setBatchSize(data.batchSize);
         if (data.localHistory) {
@@ -1076,11 +1110,38 @@ export default function ImageStudio({
         }
       }
       listNativeLibrary({ kind: "image", limit: 50 })
-        .then((items) => setLocalHistory((prev) => mergeServerHistory(prev.length ? prev : restoredHistory, items)))
-        .catch((err) => console.warn("Failed to hydrate ImageStudio library:", err));
+        .then((items) => {
+          nativeGenerationRegistry.resumeAll();
+          setLocalHistory((prev) => {
+            const merged = mergeServerHistory(prev.length ? prev : restoredHistory, items);
+            const missed = nativeGenerationRegistry.consume("image");
+            return [...missed, ...merged.filter((item) => !missed.some((entry) => sameHistoryEntry(item, entry)))].slice(0, 50);
+          });
+        })
+        .catch((err) => console.warn("Failed to hydrate ImageStudio library:", err))
+        .finally(() => {
+          registryHydratedRef.current = true;
+          const missed = nativeGenerationRegistry.consume("image");
+          if (missed.length) {
+            setLocalHistory((prev) => [...missed, ...prev.filter((item) => !missed.some((entry) => sameHistoryEntry(item, entry)))].slice(0, 50));
+          }
+        });
     } catch (err) {
       console.warn("Failed to load ImageStudio persistence:", err);
     }
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    const insertMissed = () => {
+      if (!registryHydratedRef.current) return;
+      const missed = nativeGenerationRegistry.consume("image");
+      if (missed.length) setLocalHistory((prev) => [...missed, ...prev.filter((item) => !missed.some((entry) => sameHistoryEntry(item, entry)))].slice(0, 50));
+    };
+    const unsubscribe = nativeGenerationRegistry.subscribe("image", insertMissed);
+    return unsubscribe;
   }, []);
 
   // ── Adjust height on load ────────────────────────────────────────────────
@@ -1104,6 +1165,8 @@ export default function ImageStudio({
           selectedEffect,
           maxImages,
           prompt,
+          generationName,
+          nameSequence,
           uploadedImageUrls,
           batchSize,
           localHistory,
@@ -1123,6 +1186,8 @@ export default function ImageStudio({
     selectedEffect,
     maxImages,
     prompt,
+    generationName,
+    nameSequence,
     uploadedImageUrls,
     batchSize,
     localHistory,
@@ -1212,6 +1277,51 @@ export default function ImageStudio({
     },
     [apiKey, selectedModelId],
   );
+
+  const appendGeneratedImageReferences = useCallback(
+    (urls) => {
+      const cleanUrls = (Array.isArray(urls) ? urls : []).filter(isSameOriginAssetUrl);
+      if (cleanUrls.length === 0) return;
+
+      let targetModelId = selectedModelId;
+      let targetMaxImages = getMaxImagesForI2INative(targetModelId);
+      const currentNative = isNativeModelId(targetModelId) ? nativeModelById(targetModelId) : null;
+      if (!currentNative?.tasks?.includes("image-to-image")) {
+        const target = NATIVE_I2I_DESCRIPTORS[0] || i2iModels[0];
+        targetModelId = target.id;
+        targetMaxImages = getMaxImagesForI2INative(target.id);
+        setSelectedModelId(target.id);
+        setSelectedModelName(target.name);
+        setSelectedAr(getAspectRatiosForI2INative(target.id)[0] || "1:1");
+        setSelectedQuality(getResolutionsForI2INative(target.id)[0] || null);
+        const effects = getEffectsForI2IModel(target.id);
+        setSelectedEffect(effects.length > 0 ? (getDefaultEffectForI2IModel(target.id) || effects[0]) : "");
+      }
+
+      setImageMode(true);
+      setMaxImages(targetMaxImages);
+      setUploadedImageUrls((prev) => {
+        const next = [...prev];
+        cleanUrls.forEach((url) => {
+          if (!next.includes(url)) next.push(url);
+        });
+        return next.slice(0, Math.max(1, targetMaxImages));
+      });
+    },
+    [selectedModelId],
+  );
+
+  useEffect(() => {
+    const raw = sessionStorage.getItem(GENERATED_IMAGE_TO_IMAGE_STUDIO_KEY);
+    if (!raw) return;
+    sessionStorage.removeItem(GENERATED_IMAGE_TO_IMAGE_STUDIO_KEY);
+    try {
+      const payload = JSON.parse(raw);
+      if (payload?.source === "generated-image") appendGeneratedImageReferences(payload.urls);
+    } catch (err) {
+      console.warn("Failed to consume ImageStudio generated image handoff:", err);
+    }
+  }, [appendGeneratedImageReferences, referenceHandoffNonce]);
 
   // ── Textarea auto-resize ─────────────────────────────────────────────────
   const handleTextareaInput = () => {
@@ -1320,7 +1430,7 @@ export default function ImageStudio({
   const addToHistory = useCallback(
     (entry) => {
       if (!historyItems) {
-        setLocalHistory((prev) => [entry, ...prev.slice(0, 49)]);
+        setLocalHistory((prev) => [entry, ...prev.filter((item) => !sameHistoryEntry(item, entry))].slice(0, 50));
       }
       setActiveHistoryIdx(0);
       setCurrentImageUrl(entry.url);
@@ -1341,6 +1451,28 @@ export default function ImageStudio({
       }
     }
     setLocalHistory((prev) => prev.filter((item) => item !== entry && !sameHistoryEntry(item, entry)));
+  }, []);
+
+  const renameHistoryEntry = useCallback(async (entry) => {
+    const jobId = entry?.jobId || entry?.request_id || (entry?.serverBacked ? entry?.id : null);
+    if (!entry?.native || !jobId) return;
+    const name = window.prompt("Rename generation", entry.displayName || "");
+    if (name === null) return;
+    const displayName = name.trim();
+    if (!displayName) return;
+    try {
+      const updated = await renameNativeLibraryItem(jobId, displayName);
+      setLocalHistory((prev) =>
+        prev.map((item) =>
+          item === entry || sameHistoryEntry(item, entry)
+            ? { ...item, displayName: updated.displayName || displayName, downloadName: updated.downloadName || updated.displayName || displayName }
+            : item,
+        ),
+      );
+    } catch (err) {
+      console.warn("Failed to rename ImageStudio library item:", err);
+      alert("Failed to rename generation.");
+    }
   }, []);
 
   // ── View state ─────────────────────────────────────
@@ -1379,6 +1511,8 @@ export default function ImageStudio({
 
     setGenerating(true);
     setGenerateError(null);
+    let hadError = false;
+    const { displayName: submitDisplayName, nextSequence } = nextDisplayNameForSubmit(generationName, nameSequence, history);
 
     try {
       const results = await Promise.all(
@@ -1409,6 +1543,13 @@ export default function ImageStudio({
               prompt: prompt.trim() || "",
               parameters,
               inputs,
+              displayName: submitDisplayName,
+              onSubmitted: (job) => nativeGenerationRegistry.track(job, {
+                studio: "image",
+                prompt: prompt.trim() || "",
+                displayName: submitDisplayName,
+                model: nativeModelById(selectedModelId),
+              }),
             });
             // generateNativeMedia returns { status, url, outputs, request_id,
             // native, model, error? }. Map to the shape expected by the history
@@ -1451,11 +1592,15 @@ export default function ImageStudio({
             prompt: prompt.trim(),
             model: selectedModelId,
             aspect_ratio: selectedAr,
+            displayName: res.displayName || submitDisplayName || undefined,
+            downloadName: res.downloadName || res.displayName || submitDisplayName || undefined,
             timestamp: new Date().toISOString(),
             native: !!res.native,
             serverBacked: !!res.native,
           };
           addToHistory(entry);
+          if (entry.native && entry.jobId && mountedRef.current) nativeGenerationRegistry.settle(entry.jobId);
+          if (submitDisplayName) setNameSequence(nextSequence);
           onGenerationComplete?.({
             url: res.url,
             model: selectedModelId,
@@ -1465,6 +1610,7 @@ export default function ImageStudio({
         }
       });
     } catch (e) {
+      hadError = true;
       console.error("[ImageStudio] Generation failed:", e);
       setGenerateError(e.message.slice(0, 80));
       setTimeout(() => setGenerateError(null), 4000);
@@ -1487,8 +1633,13 @@ export default function ImageStudio({
       {/* ── CENTRAL GALLERY AREA ── */}
       <div className="flex-1 w-full max-w-7xl mx-auto overflow-y-auto custom-scrollbar pb-40 lg:pb-32 px-2">
         {history.length > 0 ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6 w-full pt-4 animate-fade-in-up">
-            {history.map((entry, idx) => (
+          <div className="w-full pt-4 animate-fade-in-up">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6 w-full">
+              {history.map((entry, idx) => {
+                const referenceUrls = generatedImageReferenceUrls(entry);
+                const canUseAsGeneratedReference = referenceUrls.length > 0;
+                const nativeJobId = entry?.jobId || entry?.request_id || (entry?.serverBacked ? entry?.id : null);
+                return (
               <div
                 key={entry.id || idx}
                 className="relative group rounded-lg overflow-hidden border border-white/10 bg-[#0a0a0a] shadow-xl hover:border-primary/50 transition-all duration-300 flex flex-col"
@@ -1523,7 +1674,7 @@ export default function ImageStudio({
                     title="Download"
                     onClick={(e) => {
                       e.stopPropagation();
-                      downloadImage(entry.url, `muapi-${entry.id || idx}.jpg`);
+                      downloadImage(entry.url, imageDownloadName(entry, idx));
                     }}
                     className="p-2 bg-black/60 backdrop-blur-md rounded-full text-white hover:bg-primary hover:text-black transition-all border border-white/10"
                   >
@@ -1531,6 +1682,32 @@ export default function ImageStudio({
                       <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3" />
                     </svg>
                   </button>
+                  {canUseAsGeneratedReference && (
+                    <>
+                      <button
+                        type="button"
+                        title="Use as Image Studio reference"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onGeneratedImageReference?.("image", referenceUrls);
+                        }}
+                        className="p-2 bg-black/60 backdrop-blur-md rounded-full text-white hover:bg-primary hover:text-black transition-all border border-white/10"
+                      >
+                        <ImagePlus size={14} strokeWidth={2.5} />
+                      </button>
+                      <button
+                        type="button"
+                        title="Use as Video Studio input"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onGeneratedImageReference?.("video", referenceUrls);
+                        }}
+                        className="p-2 bg-black/60 backdrop-blur-md rounded-full text-white hover:bg-primary hover:text-black transition-all border border-white/10"
+                      >
+                        <Film size={14} strokeWidth={2.5} />
+                      </button>
+                    </>
+                  )}
                   <button
                     type="button"
                     title="Copy prompt"
@@ -1542,6 +1719,19 @@ export default function ImageStudio({
                   >
                     <Copy size={14} strokeWidth={2.5} />
                   </button>
+                  {entry.native && nativeJobId && (
+                    <button
+                      type="button"
+                      title="Rename"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        renameHistoryEntry(entry);
+                      }}
+                      className="p-2 bg-black/60 backdrop-blur-md rounded-full text-white hover:bg-primary hover:text-black transition-all border border-white/10"
+                    >
+                      <Pencil size={14} strokeWidth={2.5} />
+                    </button>
+                  )}
                   <button
                     type="button"
                     title="Delete"
@@ -1561,6 +1751,11 @@ export default function ImageStudio({
                     {entry.prompt || "No prompt provided"}
                   </p>
                   <div className="flex items-center justify-between mt-1">
+                    {entry.displayName && (
+                      <span className="max-w-full truncate text-[10px] font-semibold text-white/60" title={entry.displayName}>
+                        {entry.displayName}
+                      </span>
+                    )}
                     <span className="text-[10px] font-bold text-primary px-2 py-0.5 bg-primary/10 rounded border border-primary/20">
                       {entry.model?.replace("-", " ")}
                     </span>
@@ -1568,7 +1763,9 @@ export default function ImageStudio({
                   </div>
                 </div>
               </div>
-            ))}
+                );
+              })}
+            </div>
           </div>
         ) : (
           <div className="flex flex-col items-center justify-center h-full animate-fade-in-up transition-all duration-700 min-h-[50vh]">
@@ -1810,6 +2007,15 @@ export default function ImageStudio({
                 ))}
               </div>
             </div>
+
+            <input
+              type="text"
+              value={generationName}
+              onChange={(e) => setGenerationName(e.target.value)}
+              maxLength={120}
+              placeholder="Name (optional)"
+              className="w-full sm:w-40 rounded-md border border-white/[0.03] bg-white/[0.03] px-3 py-2 text-xs font-medium text-white/70 placeholder:text-white/20 outline-none transition-colors focus:border-[#22d3ee]/40 focus:bg-white/[0.06]"
+            />
 
             {/* Generate button */}
             <button

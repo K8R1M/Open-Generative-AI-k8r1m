@@ -75,6 +75,7 @@ export const NATIVE_MODELS = [
     durationsSeconds: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
     resolutions: [],
     maxReferenceImages: 10,
+    omniMaxVideos: 3,
     referenceImagesEnabled: true,
     supportsAspectRatio: true,
     supportsAudioToggle: false,

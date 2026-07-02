@@ -5,3 +5,4 @@
 - Preserve runtime provider environment across restarts. Native Vertex/Nano Banana requires ADC to reach the worker; do not drop `GOOGLE_APPLICATION_CREDENTIALS` or `GOOGLE_CLOUD_PROJECT` from the trusted gateway process.
 - Use the same `NATIVE_MEDIA_ROOT` across separate clones/worktrees/forks or merge their `.native-media` stores before switching back; do not run clean commands that remove ignored `.native-media`.
 - Track feature-development rounds in `feature-dev/`. Before planning or branching for the next feature run, read `feature-dev/README.md`, add the requested features there, then create the round subfolder/branch from that context.
+- When orchestrating subagents, close each subagent promptly after its final output has been captured and summarized. Do not leave completed agents open across subsequent orchestration steps.

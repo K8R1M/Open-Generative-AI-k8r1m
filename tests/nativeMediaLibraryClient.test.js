@@ -65,6 +65,99 @@ test('native library client lists by kind/limit and deletes by jobId only', asyn
   assert.ok(!calls[1].url.includes('asset-1'), 'client delete must not key requests by assetId');
 });
 
+test('native generation request and result preserve display/download metadata', async () => {
+  const impl = await loadNative('packages/studio/src/nativeMedia.js', 'native display metadata client');
+  const request = impl.buildNativeRequest({
+    modelId: 'native.vertex.nano-banana-2',
+    task: 'text-to-image',
+    prompt: 'named image',
+    displayName: 'image-studio-0001',
+  });
+  assert.equal(request.displayName, 'image-studio-0001');
+
+  const result = impl.normalizeNativeResult({
+    id: 'job-1',
+    status: 'completed',
+    model: 'native.vertex.nano-banana-2',
+    assetId: 'asset-1',
+    displayName: 'image-studio-0001',
+    downloadName: 'image-studio-0001',
+  });
+  assert.equal(result.displayName, 'image-studio-0001');
+});
+
+test('native library client posts last-frame route and downloads returned png attachment', async () => {
+  const impl = await loadNative('packages/studio/src/nativeMedia.js', 'native library last-frame client');
+  const oldDocument = global.document;
+  const oldUrl = global.URL;
+  const calls = [];
+  const clicked = [];
+  const anchors = [];
+
+  global.document = {
+    body: {
+      appendChild(node) {
+        anchors.push(node);
+      },
+      removeChild() {},
+    },
+    createElement(tag) {
+      assert.equal(tag, 'a');
+      return {
+        href: '',
+        download: '',
+        click() {
+          clicked.push({ href: this.href, download: this.download });
+        },
+      };
+    },
+  };
+  global.URL = {
+    createObjectURL(blob) {
+      assert.equal(blob.type, 'image/png');
+      return 'blob:last-frame';
+    },
+    revokeObjectURL(url) {
+      assert.equal(url, 'blob:last-frame');
+    },
+  };
+
+  const fetchImpl = async (url, opts = {}) => {
+    calls.push({ url, opts });
+    return {
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      headers: {
+        get(name) {
+          return name.toLowerCase() === 'content-disposition'
+            ? 'attachment; filename="job-video-last-frame.png"'
+            : null;
+        },
+      },
+      async blob() {
+        return new Blob(['png'], { type: 'image/png' });
+      },
+      async text() {
+        return '';
+      },
+    };
+  };
+
+  try {
+    const result = await withBrowser(fetchImpl, () => impl.downloadNativeLibraryLastFrame('job-video'));
+    assert.deepEqual(result, { filename: 'job-video-last-frame.png' });
+    assert.equal(calls[0].url, '/api/native-media/v1/library/job-video/last-frame');
+    assert.equal(calls[0].opts.method, 'POST');
+    assert.equal(calls[0].opts.headers.Accept, 'image/png');
+    assert.equal(anchors.length, 1);
+    assert.deepEqual(clicked[0], { href: 'blob:last-frame', download: 'job-video-last-frame.png' });
+  } finally {
+    global.document = oldDocument;
+    global.URL = oldUrl;
+  }
+});
+
 test('native image success without URL or asset is rejected and cannot be stored', async () => {
   const impl = await loadNative('packages/studio/src/nativeMedia.js', 'native fake image success client');
   const fetchImpl = async () => response({
@@ -177,19 +270,25 @@ const STUDIO_STATIC_CASES = [
     name: 'ImageStudio',
     file: 'packages/studio/src/components/ImageStudio.jsx',
     kind: 'image',
+    prefix: 'image-studio',
+    downloadHelper: 'imageDownloadName(entry, idx)',
     failureLog: 'Failed to delete ImageStudio library item:',
   },
   {
     name: 'VideoStudio',
     file: 'packages/studio/src/components/VideoStudio.jsx',
     kind: 'video',
+    prefix: 'video-studio',
+    downloadHelper: 'videoDownloadName(entry, idx)',
     failureLog: 'Failed to delete VideoStudio library item:',
   },
 ];
 
-for (const { name, file, kind, failureLog } of STUDIO_STATIC_CASES) {
+for (const { name, file, kind, prefix, downloadHelper, failureLog } of STUDIO_STATIC_CASES) {
   test(`${name} wires native hydration, de-dupe, copy prompt, confirm-delete, and local-only delete`, () => {
     const source = fs.readFileSync(path.join(process.cwd(), file), 'utf8');
+    const historySource = fs.readFileSync(path.join(process.cwd(), 'packages/studio/src/studioHistory.js'), 'utf8');
+    const combinedSource = `${source}\n${historySource}`;
     const count = (needle) => source.split(needle).length - 1;
 
     assert.ok(
@@ -199,7 +298,12 @@ for (const { name, file, kind, failureLog } of STUDIO_STATIC_CASES) {
     assert.ok(count('mergeServerHistory(') > 1, `${name} server hydration must de-dupe against local history`);
     assert.ok(/listNativeLibrary\([^)]*\)[\s\S]*\.catch\(/.test(source), 'server-down library load must fall back to local history');
     assert.ok(source.includes('copyPromptToClipboard(entry.prompt);'), `${name} history cards must copy exact prompt text`);
-    assert.ok(source.includes('prompt: item.prompt || ""'), `${name} server history mapping must preserve prompt`);
+    assert.ok(combinedSource.includes('prompt: item.prompt || ""'), `${name} server history mapping must preserve prompt`);
+    assert.ok(combinedSource.includes('displayName: item.displayName || item.downloadName || item.filename'), `${name} server history mapping must preserve displayName`);
+    assert.ok(source.includes(downloadHelper), `${name} downloads must use durable display/download metadata`);
+    assert.ok(source.includes('nameSequence'), `${name} must persist sticky name suffix state`);
+    assert.ok(source.includes('padStart(3, "0")'), `${name} must zero-pad sticky suffixes`);
+    assert.ok(!source.includes('nameCounter'), `${name} must not keep dead nameCounter state`);
     assert.ok(
       source.includes('confirm("Delete this generation from the interface and server? This cannot be undone.")'),
       `${name} native server delete must require the accepted confirmation text`
@@ -222,7 +326,7 @@ test('VideoStudio prunes stale native server-backed local video entries only aft
     'VideoStudio must prune stale native server-backed local entries missing from server library'
   );
   assert.ok(
-    /listNativeLibrary\(\{ kind: "video", limit: 50 \}\)[\s\S]*\.then\(\(items\) => setLocalHistory/.test(source),
+    /listNativeLibrary\(\{ kind: "video", limit: 50 \}\)[\s\S]*\.then\(\(items\) => \{[\s\S]*setLocalHistory/.test(source),
     'VideoStudio pruning must happen only on successful server library hydration'
   );
 });

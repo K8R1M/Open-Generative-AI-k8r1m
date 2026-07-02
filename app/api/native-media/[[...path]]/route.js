@@ -53,4 +53,5 @@ async function proxyNativeMedia(request) {
 
 export const GET = proxyNativeMedia;
 export const POST = proxyNativeMedia;
+export const PATCH = proxyNativeMedia;
 export const DELETE = proxyNativeMedia;

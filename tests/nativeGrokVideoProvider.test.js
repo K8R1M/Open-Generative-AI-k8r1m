@@ -182,6 +182,42 @@ test('Grok validation rejects unsupported task, model, duration, resolution, MIM
   assert.throws(() => provider.validateGrokVideoInputs({ modelId: 'native.grok.imagine-video', task: 'image-to-video', inputs: many, resolvedFiles: many.map((_, i) => ({ path: `/tmp/${i}.png`, mime: 'image/png', role: i === 0 ? 'first-frame' : 'reference' })), parameters: { durationSeconds: 6, resolution: '480p' } }), /maximum|too many|7/);
 });
 
+test('Grok input resolution accepts uploads and generated assets but rejects mismatched or external paths', async () => {
+  const provider = grok();
+  const upload = await uploadAsset(PNG_1X1, 'image/png');
+  const generated = await gateway.submitGeneration({
+    modelId: 'native.vertex.nano-banana-2',
+    task: 'text-to-image',
+    prompt: 'generated grok input',
+  });
+  const uploadResolved = await provider.resolveInputAssets([{ kind: 'asset', assetId: upload.assetId, role: 'first-frame' }], gateway.getAsset);
+  const generatedResolved = await provider.resolveInputAssets([{ kind: 'asset', assetId: generated.assetId, role: 'first-frame' }], gateway.getAsset);
+  assert.match(uploadResolved[0].path, /\/uploads\//);
+  assert.match(generatedResolved[0].path, /\/assets\//);
+
+  const wrongDir = path.join(TEST_ROOT, 'assets', 'asset-real', 'data.png');
+  await fsp.mkdir(path.dirname(wrongDir), { recursive: true });
+  await fsp.writeFile(wrongDir, PNG_1X1);
+  await assert.rejects(
+    () => provider.resolveInputAssets(
+      [{ kind: 'asset', assetId: 'asset-expected', role: 'first-frame' }],
+      async () => ({ assetId: 'asset-expected', path: wrongDir, mime: 'image/png' })
+    ),
+    /native uploaded or generated assets/
+  );
+
+  const outside = path.join(TEST_ROOT, 'other', 'asset-outside', 'data.png');
+  await fsp.mkdir(path.dirname(outside), { recursive: true });
+  await fsp.writeFile(outside, PNG_1X1);
+  await assert.rejects(
+    () => provider.resolveInputAssets(
+      [{ kind: 'asset', assetId: 'asset-outside', role: 'first-frame' }],
+      async () => ({ assetId: 'asset-outside', path: outside, mime: 'image/png' })
+    ),
+    /native uploaded or generated assets/
+  );
+});
+
 test('buildEnv drops Grok/xAI credentials from provider subprocess env', () => {
   const provider = grok();
   const env = provider.buildEnv({

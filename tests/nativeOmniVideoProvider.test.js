@@ -228,7 +228,7 @@ test('gateway imports completed Omni output as same-origin MP4 asset', async () 
   assert.equal(publicSettled.jobId || publicSettled.id, settled.id);
 });
 
-test('Omni unsupported input persists OMNI_UNSUPPORTED_INPUT with safe public message', async () => {
+test('Omni unsupported input persists specific validation message', async () => {
   setLiveGate(true);
   let jobId;
   await assert.rejects(
@@ -249,11 +249,12 @@ test('Omni unsupported input persists OMNI_UNSUPPORTED_INPUT with safe public me
         },
       }
     ),
-    /Omni could not use this input/
+    /unsupported Omni duration: 99/
   );
   const failed = await gateway.getGeneration(jobId);
   assert.equal(failed.status, 'failed');
   assert.equal(failed.error, 'OMNI_UNSUPPORTED_INPUT');
+  assert.equal(failed.message, 'unsupported Omni duration: 99');
   assert.equal(publicJob(failed).message, failed.message);
   assert.equal(publicJob(failed).prompt, 'bad duration');
   assert.equal(failed.url, undefined);

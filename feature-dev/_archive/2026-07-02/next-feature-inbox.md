@@ -164,11 +164,26 @@ This file records Karim's requested ideas for the next feature-development round
 - Output naming V1 may leave server asset filenames unchanged, but must persist the user-assigned download/display name as metadata so future library, Reference, Project, and download views can show/use that assigned name.
 - Existing working Omni script surface: `/home/k8r1m/merlin/bin/genai-omni`, documented by `/home/k8r1m/.codex/skills/generate-media/sub-skills/generate-omni/SKILL.md`.
 
-## Current Priority
+## Current Status / Priority For Fable
 
-1. Add Gemini Omni native video provider first and test it before adding adjacent buttons.
-2. Add multi-select checkboxes for generated image/video cards with batch delete only.
-3. Add last-frame download for generated videos using a deterministic server extraction helper and browser download.
-4. Add generated-image-to-reference actions for Image Studio and Video Studio.
-5. Add per-studio output naming prefixes/counters with durable download/display metadata, without renaming asset files unless later needed.
-6. Defer all project/reference/sidebar/template phases until this branch is working and merged.
+Done enough to treat as implemented:
+
+1. Gemini Omni native video provider.
+2. Multi-select generated image/video batch delete.
+3. Last-frame download for generated videos.
+4. Generated-image-to-Image-Studio reference action.
+5. Automatic per-studio display/download naming metadata.
+
+Still unresolved:
+
+1. Generated-image-to-Video-Studio reference action still fails in Karim's live `19400` test.
+2. Visible naming/prefix input was not implemented; current naming is automatic metadata only.
+3. Editable rename UI was not implemented.
+
+Next planning priority:
+
+1. Decide whether to fix the broken Video Studio handoff in the current feature branch, disable/remove that broken action before merge, or split working features into a clean merge branch.
+2. Do not merge the current feature branch to `main` just for planning. Fable can inspect both worktrees:
+   - `/home/k8r1m/Open-Generative-AI-main-19300`
+   - `/home/k8r1m/Open-Generative-AI`
+3. Defer project/reference/sidebar/template phases until the current branch is either fixed and merged or deliberately narrowed.

@@ -60,6 +60,8 @@ const CAPABILITY_CONSTRAINTS = {
   // V1 single-host scheduler caps per provider.
   providerConcurrency: scheduler.PROVIDER_CONCURRENCY,
 };
+const UPLOAD_MAX_BYTES = 250 * 1024 * 1024;
+const ALLOWED_UPLOAD_LABEL = 'png, jpeg, webp, mp4';
 
 const CREDENTIAL_FIELDS = new Set([
   'apiKey',
@@ -94,6 +96,14 @@ const idempotencyLocks = new Map();
 const queuedLaunchOptions = new Map();
 let jobsWriteQueue = Promise.resolve();
 const ALLOWED_INPUT_ROLES = new Set(['first-frame', 'last-frame', 'input', 'start-frame', 'end-frame', 'reference']);
+
+function cleanDisplayName(value) {
+  if (value == null || value === '') return null;
+  if (typeof value !== 'string') throw new Error('displayName is invalid');
+  const safe = String(value).replace(/[\\/]+/g, '-').replace(/\.\.+/g, '-').replace(/\.[A-Za-z0-9]+$/, '').replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 120);
+  if (!safe) throw new Error('displayName is invalid');
+  return safe;
+}
 
 // --- Fake subprocess script (kept here so the gateway ships no extra file) ---
 const FAKE_SUBPROCESS_SCRIPT = `
@@ -173,6 +183,13 @@ function veoReferenceImagesEnabled() {
   return process.env.NATIVE_MEDIA_VEO_REFERENCE_IMAGES === 'true';
 }
 
+function capabilityConstraints() {
+  return {
+    ...CAPABILITY_CONSTRAINTS,
+    veoMaxReferenceImages: veoReferenceImagesEnabled() ? CAPABILITY_CONSTRAINTS.veoMaxReferenceImages : 0,
+  };
+}
+
 function assetUrl(assetId) {
   return `${ASSET_URL_PREFIX}${assetId}`;
 }
@@ -218,35 +235,51 @@ function validateCredentialFree(value, trail = []) {
 
 function validateGenerationRequest(request) {
   validateCredentialFree(request);
-  if (!request || typeof request !== 'object') throw new Error('generation request must be an object');
-  if (!MODELS.some((m) => m.id === request.modelId)) throw new Error(`unsupported native model: ${request.modelId}`);
-  if (!request.prompt || typeof request.prompt !== 'string') throw new Error('prompt is required');
+  if (!request || typeof request !== 'object') throw validationError('generation request must be an object');
+  if (!MODELS.some((m) => m.id === request.modelId)) throw validationError(`unsupported native model: ${request.modelId}`);
   const model = MODELS.find((m) => m.id === request.modelId);
-  if (!model.tasks.includes(request.task)) throw new Error(`unsupported native task for model: ${request.task}`);
-  if (model.id === 'native.vertex.nano-banana-2' && request.parameters && request.parameters.imageSize === '2K') {
-    throw new Error('Nano Banana 2 imageSize 2K is not supported');
-  }
+  if (!model.tasks.includes(request.task)) throw validationError(`unsupported native task for model: ${request.task}`);
   const inputs = Array.isArray(request.inputs) ? request.inputs : [];
+  const rawPrompt = typeof request.prompt === 'string' ? request.prompt : '';
+  const hasPrompt = rawPrompt.trim().length > 0;
+  const prompt = hasPrompt ? rawPrompt : '';
+  const promptOptional = inputs.length > 0 && (request.task === 'image-to-video' || model.provider === 'omni');
+  if (!hasPrompt && !promptOptional) throw validationError('prompt is required');
+  if (model.id === 'native.vertex.nano-banana-2' && request.parameters && request.parameters.imageSize === '2K') {
+    throw validationError('Nano Banana 2 imageSize 2K is not supported');
+  }
   if (model.id === 'native.vertex.nano-banana-pro') {
     const referenceCount = inputs.reduce((count, input) => count + (input && input.role === 'reference' ? 1 : 0), 0);
     if (referenceCount > 1) {
-      throw new Error(`Nano Banana Pro only accepts 1 ref image (reference image limit; got ${referenceCount})`);
+      throw validationError(`Nano Banana Pro only accepts 1 ref image (reference image limit; got ${referenceCount})`);
     }
   }
+  let veoReferenceCount = 0;
+  let veoFrameCount = 0;
   for (const input of inputs) {
-    if (!input || typeof input !== 'object') throw new Error('native input must be an asset reference');
-    if ((input.kind || 'asset') !== 'asset' || input.url) throw new Error('native inputs must use uploaded asset references');
-    if (!ALLOWED_INPUT_ROLES.has(input.role || 'input')) throw new Error(`unsupported native input role: ${input.role}`);
+    if (!input || typeof input !== 'object') throw validationError('native input must be an asset reference');
+    if ((input.kind || 'asset') !== 'asset' || input.url) throw validationError('native inputs must use uploaded asset references');
+    if (!ALLOWED_INPUT_ROLES.has(input.role || 'input')) throw validationError(`unsupported native input role: ${input.role}`);
     if (isVeoModel(request.modelId) && input.role === 'reference' && !veoReferenceImagesEnabled()) {
-      throw new Error('Veo reference images are disabled for this native capability set');
+      throw validationError('Veo reference images are disabled for this native capability set');
     }
+    if (isVeoModel(request.modelId) && input.role === 'reference') veoReferenceCount += 1;
+    if (isVeoModel(request.modelId) && ['first-frame', 'last-frame', 'input', 'start-frame', 'end-frame'].includes(input.role || 'input')) veoFrameCount += 1;
     const assetId = input.assetId || input.asset_id || input.id;
-    if (!assetId || typeof assetId !== 'string') throw new Error('native input assetId is required');
+    if (!assetId || typeof assetId !== 'string') throw validationError('native input assetId is required');
     if (/[/\\]/.test(assetId) || assetId.includes('..') || assetId.includes('://') || assetId.startsWith('//')) {
-      throw new Error('native input assetId is invalid');
+      throw validationError('native input assetId is invalid');
     }
   }
-  return { ...request, inputs, parameters: request.parameters || {} };
+  if (veoReferenceCount > 0 && veoFrameCount > 0) {
+    throw validationError('Veo reference images cannot be combined with a first or last frame');
+  }
+  const aspect = request.parameters && (request.parameters.aspectRatio ?? request.parameters.aspect_ratio);
+  if (veoReferenceCount > 0 && String(aspect || '16:9') !== '16:9') {
+    throw validationError('Veo reference images require 16:9 aspect ratio');
+  }
+  const displayName = cleanDisplayName(request.displayName);
+  return { ...request, prompt, inputs, parameters: request.parameters || {}, ...(displayName ? { displayName, downloadName: displayName } : {}) };
 }
 
 async function validateInputAssets(clean) {
@@ -258,9 +291,12 @@ async function validateInputAssets(clean) {
 }
 
 function validateUpload(bytes, declaredMime) {
+  const size = bytes && typeof bytes.length === 'number' ? bytes.length : 0;
+  if (size === 0) throw validationError('upload file is empty');
+  if (size > UPLOAD_MAX_BYTES) throw validationError('upload exceeds 250MB limit');
   const mime = sniffMime(bytes, declaredMime);
   const ext = extensionForMime(mime);
-  if (!ext) throw new Error(`unsupported upload MIME type: ${declaredMime || 'unknown'}`);
+  if (!ext) throw validationError(`unsupported upload MIME type: ${declaredMime || 'unknown'} - allowed: ${ALLOWED_UPLOAD_LABEL}`);
   return { mime, ext };
 }
 
@@ -280,6 +316,20 @@ async function saveAsset(bytes, { mime, ext, root = ASSETS_DIR } = {}) {
   const meta = { id: assetId, assetId, mime, path: finalPath, url: assetUrl(assetId), createdAt: new Date().toISOString() };
   await fsp.writeFile(path.join(dir, 'meta.json'), JSON.stringify(meta, null, 2));
   return { assetId, id: assetId, url: meta.url, mime };
+}
+
+async function saveDerivedFrameAsset(bytes, { jobId } = {}) {
+  const saved = await saveAsset(bytes, { mime: 'image/png', ext: 'png' });
+  const asset = await getAsset(saved.assetId);
+  if (asset && asset.path) {
+    const metaPath = path.join(path.dirname(asset.path), 'meta.json');
+    const meta = JSON.parse(await fsp.readFile(metaPath, 'utf8'));
+    await fsp.writeFile(metaPath, JSON.stringify({
+      ...meta,
+      derivedFrom: { jobId, kind: 'last-frame' },
+    }, null, 2));
+  }
+  return saved;
 }
 
 async function uploadAsset(file) {
@@ -366,6 +416,7 @@ async function drainQueued(provider) {
       parameters: job.parameters || {},
       inputs: job.inputs || [],
       clientRequestId: job.clientRequestId || null,
+      displayName: job.displayName || job.downloadName || null,
     };
     try {
       const launchOptions = queuedLaunchOptions.get(job.id) || {};
@@ -838,6 +889,8 @@ async function submitGenerationUnlocked(clean, options = {}) {
     parameters: clean.parameters,
     inputs: clean.inputs,
     clientRequestId: idempotencyKey,
+    displayName: clean.displayName || undefined,
+    downloadName: clean.downloadName || clean.displayName || undefined,
     createdAt: now,
     native: true,
     provider,
@@ -939,6 +992,53 @@ async function deleteLibraryJob(jobId) {
   return tombstoned;
 }
 
+function nativeHttpError(status, body, message = body && body.error) {
+  const error = new Error(message || 'native media request failed');
+  error.nativeMediaStatus = status;
+  error.nativeMediaBody = body;
+  return error;
+}
+
+function validationError(message) {
+  return nativeHttpError(400, { error: 'BAD_REQUEST', message }, message);
+}
+
+async function renameLibraryJob(jobId, body = {}) {
+  if (!jobId || typeof jobId !== 'string' || /[/\\]/.test(jobId) || jobId.includes('..')) throw new Error('invalid library job id');
+  if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error('rename request must be an object');
+  if (typeof body.displayName !== 'string' || body.displayName.length < 1 || body.displayName.length > 120) {
+    throw new Error('displayName is invalid');
+  }
+  const displayName = cleanDisplayName(body.displayName);
+  const renamed = await updateJobsAtomic((jobs) => {
+    const job = jobs[jobId];
+    if (!job) return null;
+    if (job.deletedAt || job.status === 'asset_deleted') {
+      throw nativeHttpError(409, { error: 'CONFLICT', message: 'Library job is deleted.' });
+    }
+    if (job.status !== 'completed') {
+      throw nativeHttpError(409, { error: 'CONFLICT', message: 'Library job is not completed.' });
+    }
+    const now = new Date().toISOString();
+    jobs[jobId] = { ...job, displayName, downloadName: displayName, updatedAt: now };
+    return jobs[jobId];
+  });
+  return renamed;
+}
+
+async function resolveLibraryVideoAsset(jobId) {
+  if (!jobId || typeof jobId !== 'string' || !/^job-[A-Za-z0-9-]+$/.test(jobId)) throw new Error('invalid library job id');
+  await ensureStore();
+  const job = readJsonSync(JOBS_FILE)[jobId];
+  if (!job || job.deletedAt || job.status === 'asset_deleted') return null;
+  if (job.status !== 'completed') throw new Error('library job is not completed');
+  if (!isSafeAssetId(job.assetId)) throw new Error('invalid native media asset id');
+  const asset = await readGeneratedAsset(job.assetId);
+  if (!asset) throw new Error('native media asset not found');
+  if (!String(asset.mime || '').startsWith('video/')) throw new Error('native media asset is not a video');
+  return { job, asset };
+}
+
 async function cancelGeneration(id) {
   await ensureStore();
   const jobs = readJsonSync(JOBS_FILE);
@@ -1021,8 +1121,9 @@ async function reconcileOnRestart() {
 }
 
 function getNativeCapabilities() {
-  if (!isEnabled()) return { models: [], constraints: CAPABILITY_CONSTRAINTS, native: true };
-  return { models: MODELS, constraints: CAPABILITY_CONSTRAINTS, native: true };
+  const constraints = capabilityConstraints();
+  if (!isEnabled()) return { models: [], constraints, native: true };
+  return { models: MODELS, constraints, native: true };
 }
 
 async function getAsset(assetId) {
@@ -1086,11 +1187,15 @@ module.exports = {
   providerFor,
   reconcileJob,
   reconcileOnRestart,
+  renameLibraryJob,
+  resolveLibraryVideoAsset,
+  saveDerivedFrameAsset,
   scheduler,
   submitGeneration,
   uploadAsset,
   validateGenerationRequest,
   validateRequest: validateGenerationRequest,
   validateUpload,
+  validationError,
   _storeRootForTest: ROOT,
 };
