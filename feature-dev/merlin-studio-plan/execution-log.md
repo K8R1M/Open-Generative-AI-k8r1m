@@ -260,3 +260,14 @@ Append-only. Newest entries go at the bottom.
 - Checks passed: `npm run build:studio`; `npx playwright test tests/e2e/rebrand-smoke.spec.js --reporter=line` (`1 passed`); `npm run build:packages && npm run build`.
 - Playwright setup note: `@playwright/test` was declared in `package.json`/`package-lock.json` but missing from `node_modules`; `npm install` restored declared packages before the focused smoke.
 - Remaining Slice 03 work: configure systemd hosting on `19300`, verify app/library health, then update state files again.
+
+## 2026-07-02 -- Slice 03 systemd hosting on 19300
+
+- Created user units: `/home/k8r1m/.config/systemd/user/studio-gateway.service` and `/home/k8r1m/.config/systemd/user/studio-portal.service`.
+- Disabled/stopped old dev services: `open-generative-ai.service` and `open-generative-ai-native-worker.service`.
+- Enabled/started new services: `studio-gateway.service` runs `native-media-gateway/server.js` on `19334`; `studio-portal.service` runs production `next start --hostname 127.0.0.1 --port 19300`.
+- Preserved runtime env: shared `NATIVE_MEDIA_ROOT=/home/k8r1m/Open-Generative-AI/.native-media`, `NATIVE_MEDIA_LIVE_VERTEX=1`, `NATIVE_MEDIA_LIVE_CODEX=1`, `NATIVE_MEDIA_VEO_REFERENCE_IMAGES=true`, `NEXT_PUBLIC_NATIVE_VEO_REFERENCE_IMAGES=true`, `GOOGLE_CLOUD_PROJECT`, `GOOGLE_APPLICATION_CREDENTIALS`, and `NATIVE_MEDIA_ALLOW_GOOGLE_APPLICATION_CREDENTIALS=1` on the gateway.
+- Verification passed: `systemctl --user status studio-gateway.service studio-portal.service`; gateway health returned `ok: true`, pid `451137` then `451634` after restart, port `19334`, fresh `sourceFingerprint=1783009194661.3186`; `curl -I http://127.0.0.1:19300/studio` returned `HTTP/1.1 200 OK`; `curl -I http://127.0.0.1:19300/merlin-studio-logo-v1.jpg` returned `200 OK` and `Content-Type: image/jpeg`; library proxy returned 5 real items; `systemctl --user restart studio-gateway.service studio-portal.service` survived and both services returned `active`.
+- Journal check: latest `journalctl --user -u studio-gateway.service -u studio-portal.service -n 50` showed clean startup/restart logs and native media reconciliation with `unchanged: 146`.
+- Linger check: `loginctl show-user "$USER" -p Linger` returned `Linger=yes`.
+- Phase 2 policy: `/home/k8r1m/Open-Generative-AI` remains on `feature/merlin-studio-v1`; no Phase 2 feature work was started. From here, `main`, `19300`, and the two `studio-*` services are frozen until Fable Phase 2 review/approval or a future approved Gate D redeploy.
