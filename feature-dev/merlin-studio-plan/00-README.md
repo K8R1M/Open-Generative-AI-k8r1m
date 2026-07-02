@@ -5,7 +5,7 @@ Executors: GPT 5.5 High (orchestrator + backend/architecture coder), GLM 5.2 (fr
 Karim reviews at the end of each phase gate; Fable returns at the audit step,
 end of Phase 1, and final review.
 
-**PLAN STATUS: `FINAL — PHASE 1 APPROVED + GATE A CORRECTION APPROVED` (Fable, 2026-07-02: Gate A reached, not signed off; root causes investigated and correction slices C0-C3 + Gate A2 defined in `gate-a-correction-plan.md` — execute those before slice 03)**
+**PLAN STATUS: `FINAL — GATE A2 SIGNED OFF — LOCAL MAIN MERGED — SLICE 03 PARTIAL` (2026-07-02: C0-C3 passed review, Karim signed off Gate A2 on 19400, local `main` fast-forwarded to commit `ac4cc2b`; next Slice 03 work is rebrand + systemd hosting on 19300 + Phase 2 runtime policy.)**
 (Only Fable updates this line. Executors: if the status is not
 `FINAL — PHASE 1 APPROVED` or later, do not write any code.)
 
@@ -51,8 +51,8 @@ This is the master sequence. Karim should never have to re-explain it.
 ## What this is
 
 A slice-by-slice plan to take the Open-Generative-AI fork from its current state
-(feature branch `feature/omni-v1-adjacent-controls`, two known bugs, several working
-new features) to **Merlin Studio**: a personal creative production portal with
+(local `main` includes the Gate A2-approved native media fixes; the next worktree
+branch is `feature/merlin-studio-v1`) to **Merlin Studio**: a personal creative production portal with
 projects, storyboards, reusable references, uploads library, continuity chaining,
 and prompt templates — layered over the existing native media gateway without
 breaking any working provider path.
@@ -125,7 +125,7 @@ Gates (Karim tests manually before proceeding):
 | Surface | Branch | How it runs | Who touches it |
 |---|---|---|---|
 | **19300** (daily app) | `main` | systemd user services (`studio-portal.service` + `studio-gateway.service`, defined in slice 03), production build | Only slice 03 (Phase 1 ship) and the final Gate D redeploy. Nothing else, ever. |
-| **19400** (dev/test) | Phase 1: `feature/omni-v1-adjacent-controls` → Phase 2: `feature/merlin-studio-v1` | `next dev --port 19400` + dev gateway on **19335** with `NATIVE_MEDIA_PROJECTS=1` | All slice work and Karim's gate testing |
+| **19400** (dev/test) | Phase 2: `feature/merlin-studio-v1` | `next dev --port 19400` + dev gateway on **19335** with `NATIVE_MEDIA_PROJECTS=1` | All slice work and Karim's gate testing |
 | e2e harness | per-branch | ephemeral ports 19488 (app) / 19489 (gateway), temp `NATIVE_MEDIA_ROOT` | Playwright only |
 
 The shared real media store (`NATIVE_MEDIA_ROOT` → `.native-media`) is used by

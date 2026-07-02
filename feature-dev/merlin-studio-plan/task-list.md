@@ -102,10 +102,10 @@ Scope for this orchestration window: Phase 1 slices 00, 01, 02 only; stop at Gat
 - [x] Gate A2: Karim runs the 12-step script in `gate-a-correction-plan.md` §7.
 - [x] Gate A2: sign-off recorded; slice 03 unblocked (with §2.2 systemd env amendment).
 
-### Slice 03 -- Phase 1 Ship (Blocked Until Gate A Sign-off)
+### Slice 03 -- Phase 1 Ship (Gate A2 Signed Off; Partially Complete)
 
 - [ ] 03.A Rebrand to Merlin Studio on the feature branch.
-- [ ] 03.B Merge gate to main.
+- [x] 03.B Merge gate to main (local `main` fast-forwarded to `ac4cc2b`; not pushed).
 - [ ] 03.C Configure systemd hosting on 19300.
 - [ ] 03.D Open Phase 2 branch/runtime policy.
 

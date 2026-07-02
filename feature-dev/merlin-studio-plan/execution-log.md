@@ -228,7 +228,7 @@ Append-only. Newest entries go at the bottom.
 - Reachability: `curl -I http://127.0.0.1:19400/studio` returned `HTTP/1.1 200 OK`.
 - Proxy capability check through `19400`: `/api/native-media/v1/capabilities` returned `native: true`, `modelCount: 7`, `constraints.veoMaxReferenceImages: 3`, and `constraints.omniMaxVideos: 3`.
 - Validation evidence from C3 final state: targeted registry/studio/client units `34/34`, `npm run build:studio`, `git diff --check`, and C3 Playwright e2e twice `2/2` each.
-- Gate A2 status: pre-flight complete. Awaiting Karim's manual retest per `gate-a-correction-plan.md` §7 and explicit Gate A2 sign-off before slice 03, `main`, or `19300` work.
+- Gate A2 status at that moment: pre-flight complete. Superseded by the Gate A2 sign-off and local main merge entries below.
 
 ## 2026-07-02 -- Gate A2 sign-off
 
@@ -236,3 +236,11 @@ Append-only. Newest entries go at the bottom.
 - Non-blocking later note 1: while removing image refs from Video Studio with native Grok Imagine selected, Karim observed the selected model had changed to Seedance Lite. Desired later behavior: ref removal never changes the selected model. Recorded in `90-future-work-outline.md`.
 - Non-blocking later note 2: repeated Image Studio -> Video Studio reference handoffs currently insert the newest image before earlier refs. Desired later behavior: append each new handoff ref as the next slot, preserving order. Recorded in `90-future-work-outline.md`.
 - Gate A2 status: signed off. Karim approved merging the working feature state back to `main`; the two notes are explicitly not blockers.
+
+## 2026-07-02 -- Local main merge and Phase 2 branch alignment
+
+- Commit `ac4cc2b` (`Ship approved Gate A2 native studio fixes`) was created from the Gate A2-approved feature state.
+- Local `main` in `/home/k8r1m/Open-Generative-AI-main-19300` was fast-forwarded to `ac4cc2b`. It is now ahead of `origin/main` by 3 commits. No push was performed.
+- Port `19300` runtime/systemd was not restarted or reconfigured in this step.
+- The continuing feature branch in `/home/k8r1m/Open-Generative-AI` is now `feature/merlin-studio-v1`, matching the Phase 2 branch name in this plan.
+- Slice 03 status: 03.B local main merge is complete; 03.A rebrand, 03.C systemd hosting on 19300, and 03.D Phase 2 runtime policy remain.
