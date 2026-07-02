@@ -244,3 +244,10 @@ Append-only. Newest entries go at the bottom.
 - Port `19300` runtime/systemd was not restarted or reconfigured in this step.
 - The continuing feature branch in `/home/k8r1m/Open-Generative-AI` is now `feature/merlin-studio-v1`, matching the Phase 2 branch name in this plan.
 - Slice 03 status: 03.B local main merge is complete; 03.A rebrand, 03.C systemd hosting on 19300, and 03.D Phase 2 runtime policy remain.
+
+## 2026-07-02 -- Slice 03 logo source received; fresh-session handoff requested
+
+- Karim saved the candidate Merlin Studio logo at `/home/k8r1m/Open-Generative-AI-main-19300/public/merlin-studio-logo-v1.jpg`.
+- File inspection: JPEG, progressive, `1983x793`, about `2.5:1` wide logo ratio. The original file was not modified and no resized copies were created.
+- Karim explicitly wants no more substantive work in the current high-context session. Next session should continue from the live state files and preserve handoff, then wire the logo/rebrand minimally on `main`, verify/build, and only then configure systemd hosting on `19300`.
+- Current branch alignment remains: `/home/k8r1m/Open-Generative-AI` is `feature/merlin-studio-v1`; `/home/k8r1m/Open-Generative-AI-main-19300` is `main` and contains the untracked logo source.

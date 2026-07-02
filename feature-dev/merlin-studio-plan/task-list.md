@@ -105,6 +105,8 @@ Scope for this orchestration window: Phase 1 slices 00, 01, 02 only; stop at Gat
 ### Slice 03 -- Phase 1 Ship (Gate A2 Signed Off; Partially Complete)
 
 - [ ] 03.A Rebrand to Merlin Studio on the feature branch.
+  - [x] 03.A.logo Source logo received: `/home/k8r1m/Open-Generative-AI-main-19300/public/merlin-studio-logo-v1.jpg` (`1983x793`, original untouched).
+  - [ ] 03.A.logo Wire the logo into the app header/sidebar with minimal rebrand, then build/check.
 - [x] 03.B Merge gate to main (local `main` fast-forwarded to `ac4cc2b`; not pushed).
 - [ ] 03.C Configure systemd hosting on 19300.
 - [ ] 03.D Open Phase 2 branch/runtime policy.
